@@ -268,31 +268,73 @@ Kanal dəsti = "normal quyuların ən azı K-sında mövcud olan kanallar":
 Yəni **kanal sayı ilə quyu əhatəsi bir-birinə ziddir** və 22 kanalın hamısını
 tələb etmək **heç bir quyu** buraxmır.
 
-### Qərar
+### Bu cədvəlin özü yanlış kriteriyaya görə sıralanıb — §9-a bax
 
-**Əsas arm: 2 kanal (`P-TPT`, `T-TPT`)** + mask kanalları. Bütün 7 pozitiv quyu
-və 3,040 normal saat qalır. Bu iki kanal TPT-nin (temperatur/təzyiq
-transduseri) təzyiq və temperaturudur — hidratın fiziki imzasının məhz olduğu
-yer, yəni bu, məcburiyyətdən doğan bəraət deyil, fiziki olaraq düzgün cütdür.
-100 saatda 1 yalan həyəcan büdcəsini kalibrləmək üçün normal saat lazımdır,
-ona görə 3,040 h vs 1,467 h fərqi həlledicidir.
+Yuxarıdakı cədvəl kanalı "quyuda mövcuddur" kimi **quyu üzrə orta** ilə
+qiymətləndirir. Bu, instans səviyyəsində sensor ölümünü görmür və ona görə də
+səhv dəst seçdirir. Düzgün kriteriya §9-dadır.
 
-**İkinci arm: 7 kanal** (K≥7), həssaslıq analizi kimi — *"daha çox kanal, daha
-az quyu: hansı qazanır?"* Hesabatda güclü Discussion paraqrafı, itki deyil.
+---
 
-`build_cache` artıq `--channels` seçimini qəbul edir, ona görə hər iki arm
-kod dəyişmədən qurulur:
+## 9. Tapıntı №5-in davamı — düzgün kriteriya "quyu" deyil, "hadisə"dir
+
+2-kanallıq (`P-TPT`, `T-TPT`) cache qurulduqdan sonra 14 transient hadisədən
+yalnız 9-u qaldı. Səbəb: **üç instansda həmin iki sensor bütün qeydiyyat boyu
+donmuş vəziyyətdədir** (ardıcıl eyni dəyər, `frozen_run_mask` düzgün işləyir —
+bunlar həqiqətən ölü sensorlardır):
+
+| İnstans | P-TPT / T-TPT | Sağ qalan kanallar |
+|---|---|---|
+| `WELL-00040_20181013160242` | 34,417 s boyu sabit | P-ANULAR, P-JUS-CKGL, P-MON-CKP, QGL, T-JUS-CKP |
+| `WELL-00041_20181013160201` | 33,265 s boyu sabit | + P-PDG, T-PDG |
+| `WELL-00014_20170214190000` | 21,601 s boyu sabit | 9 kanal sağdır — **və bu, 3 blokaj hadisəsindən biridir** |
+
+Yəni kanal dəstini quyu əhatəsinə görə seçmək səhvdir; **hadisə əhatəsinə görə**
+seçilməlidir. `tools/channel_tradeoff.py` bunu instans səviyyəsində ölçür
+(`usable_frac = kanallar üzrə orta (1 − missing_or_frozen)`, yəni
+`min_valid_frac`-ın həqiqətən yoxladığı şey).
+
+### Ölçülmüş nəticə
+
+| Kanal dəsti | Kanal | Transient hadisə | Blokaj | Pozitiv quyu | Normal saat |
+|---|---|---|---|---|---|
+| **`P-MON-CKP, P-JUS-CKGL, T-TPT, T-JUS-CKP, P-ANULAR`** | **5** | **14/14** | **3/3** | **7/7** | **1,467 h** |
+| `P-MON-CKP, P-JUS-CKGL` | 2 | 14/14 | 3/3 | 7/7 | 1,462 h |
+| `P-MON-CKP` | 1 | 14/14 | 3/3 | 7/7 | 1,422 h |
+| `P-TPT, T-TPT` (əvvəlki seçim) | 2 | **9/14** | 2/3 | 4/7 | 2,137 h |
+| K≥7 dəsti (§8) | 7 | 9/14 | 2/3 | 4/7 | 172 h |
+
+Tək kanal olaraq **`P-MON-CKP`** (choke-dan yuxarı təzyiq) bütün 14 hadisəni və
+hər üç blokajı saxlayır; `P-JUS-CKGL` və `T-JUS-CKP` də eyni.
+`P-TPT`/`T-TPT` isə hadisələrin üçdə birini itirir.
+
+### Qərar (yenilənmiş)
+
+**Əsas arm: 5 kanal — `P-MON-CKP, P-JUS-CKGL, T-TPT, T-JUS-CKP, P-ANULAR`.**
+14/14 transient, 3/3 blokaj, 7/7 pozitiv quyu, 1,467 normal saat. 1,467 saat
+100 saatlıq yalan-həyəcan büdcəsindən 14 dəfə çoxdur, yəni threshold
+kalibrləməsi üçün tamamilə kifayətdir — hadisə itirmək isə bərpa olunmazdır.
+
+**Düzəliş:** §8-də `P-TPT`/`T-TPT`-ni "hidratın fiziki imzasının olduğu yer"
+kimi tövsiyə etmişdim. Bu, səthi mülahizə idi və ölçmə onu təkzib edir — həmin
+iki sensor məhz ən çox lazım olan üç instansda ölüdür. Fiziki intuisiya
+instans səviyyəsində mövcudluq yoxlanışını əvəz etmir.
+
+**İkinci arm (həssaslıq):** `P-TPT, T-TPT` — *"daha çox normal saat, daha az
+hadisə: hansı qazanır?"* Hesabatda Discussion paraqrafı.
 
 ```bash
 python -m src.data.build_cache --root data/3W/dataset --out data/cache \
+    --channels P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR
+python -m src.data.build_cache --root data/3W/dataset --out data/cache_tpt \
     --channels P-TPT,T-TPT
-python -m src.data.build_cache --root data/3W/dataset --out data/cache_7ch \
-    --channels ESTADO-PXO,ESTADO-W2,ESTADO-XO,P-MON-CKP,P-PDG,P-TPT,T-TPT
 ```
 
 ### Hesabata mütləq düşməli
 
 Bu tapıntı **§2.3-ün missingness müzakirəsini əvəz etmir, kəskinləşdirir**:
-statement dataset boyu missingness-dən danışır, amma real problem *quyular
-arasında instrumentasiya fərqidir*. Bu, "unseen well" ümumiləşdirməsinin niyə
-çətin olduğuna dair ayrıca, dürüst bir izahdır və Limitations bölməsinə düşür.
+statement dataset boyu missingness-dən danışır, amma real problem iki
+səviyyədədir — *quyular arasında instrumentasiya fərqi* və *instans daxilində
+sensor ölümü*. İkincisi, 57 real instansın hansının həqiqətən istifadə oluna
+biləcəyini təyin edir və "unseen well" ümumiləşdirməsinin niyə çətin olduğuna
+dair ən dürüst izahdır. Limitations bölməsinə düşür.

@@ -259,26 +259,30 @@ Slaydları yığ və formatla (10–12), `v1.0-final` tag.
 
 ---
 
-## 8. Açıq qərar — kanal dəsti (bu gün verilməli)
+## 8. Kanal dəsti — qərar verildi (`DATA_FINDINGS.md` §8–§9)
 
-`DATA_FINDINGS.md` §8-dəki ölçmə: hər quyu fərqli kanalları ölçür, ona görə
-kanal sayı ilə quyu əhatəsi **bir-birinə ziddir**. Ölçülmüş trade-off:
+Hər quyu fərqli kanalları ölçür, üstəlik bəzi instanslarda sensor bütün
+qeydiyyat boyu donmuşdur. Kanal dəstini **quyu əhatəsinə** görə seçmək səhv
+nəticə verirdi; düzgün kriteriya **hadisə əhatəsidir**
+(`tools/channel_tradeoff.py`, instans səviyyəsində ölçür):
 
-| Kanal dəsti | Kanal | Pozitiv quyu | Normal quyu | Normal saat |
-|---|---|---|---|---|
-| `P-TPT, T-TPT` | **2** | **7/7** | **8/9** | **3,040 h** |
-| K≥7 dəsti | 7 | 6/7 | 6/9 | 1,467 h |
-| K≥6 dəsti | 13 | 5/7 | 2/9 | 1,230 h |
+| Kanal dəsti | Kanal | Transient hadisə | Blokaj | Pozitiv quyu | Normal saat |
+|---|---|---|---|---|---|
+| **`P-MON-CKP, P-JUS-CKGL, T-TPT, T-JUS-CKP, P-ANULAR`** | **5** | **14/14** | **3/3** | **7/7** | **1,467 h** |
+| `P-MON-CKP` tək | 1 | 14/14 | 3/3 | 7/7 | 1,422 h |
+| `P-TPT, T-TPT` | 2 | 9/14 | 2/3 | 4/7 | 2,137 h |
 
-**Tövsiyə:** əsas arm = **2 kanal** (`P-TPT`, `T-TPT` + mask kanalları). Səbəb:
-bütün 7 pozitiv quyu və 3,040 normal saat qalır — 100 saatda 1 yalan həyəcanı
-kalibrləmək üçün normal saat lazımdır, və bu iki kanal (TPT təzyiq/temperatur)
-məhz hidratın fiziki imzasının olduğu yerdir. İkinci arm = 7 kanal, həssaslıq
-analizi kimi: "daha çox kanal, daha az quyu — hansı qazanır?" Bu, hesabatda
-güclü bir Discussion paraqrafıdır, itki deyil.
+**Əsas arm: 5 kanal** (yuxarıdakı). Cache bu dəstlə qurulur. 1,467 saat
+100 saatlıq yalan-həyəcan büdcəsindən 14 dəfə çoxdur — kalibrləmə üçün
+kifayətdir, hadisə itkisi isə bərpa olunmazdır.
 
-Cache hazırda 2-kanal dəsti ilə qurulur. 7-kanal arm-ı M1-in həssaslıq
-qaçışlarındadır.
+**İkinci arm (M1-in həssaslıq qaçışı):** `P-TPT, T-TPT` — daha çox normal saat,
+daha az hadisə. Discussion paraqrafı.
+
+⚠️ Üç instansda (`WELL-00040_20181013160242`, `WELL-00041_20181013160201`,
+`WELL-00014_20170214190000` — sonuncusu 3 blokaj hadisəsindən biridir)
+`P-TPT`/`T-TPT` tamamilə donmuşdur. M2 fold qurarkən bunu bilməlidir: hadisə
+sayı kanal dəstindən asılıdır.
 
 ---
 
