@@ -1,0 +1,49 @@
+"""
+Module 8 — threshold selection. Member 4, W4.3.
+
+Thresholds are selected on validation folds ONLY, at a fixed false-alarm
+budget, then applied unchanged to test folds -- this is what makes the
+lead-time comparison across models meaningful (same operating point for
+everyone). Addendum decision: target_far = 1 false alarm per 100
+operating-hours is the reported headline point; also sweep the full
+curve (select_threshold_curve) so other budgets stay visible.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from src.eval.alarm import alarm_times
+
+
+def select_threshold(
+    y_val_proba: dict,       # {instance_id: (n_windows,) positive_score()}
+    y_val_time: dict,        # {instance_id: (n_windows,) window_end_time}
+    val_normal_hours: float,
+    smooth_window: int,
+    min_duration: float,
+    target_far: float = 1 / 100,   # 1 false alarm per 100 operating-hours
+) -> float:
+    """
+    Sweep candidate thresholds; for each, count false-alarm onsets
+    (alarm.alarm_times) on Normal-only validation instances, divide by
+    val_normal_hours, and pick the threshold whose false-alarm rate is
+    closest to target_far without exceeding it (prefer under-alarming
+    over over-alarming when no exact match exists).
+    """
+    # TODO: sweep e.g. np.linspace(0, 1, 200), reuse alarm_times() per
+    # candidate threshold, select per the rule above.
+    raise NotImplementedError
+
+
+def select_threshold_curve(
+    y_val_proba: dict, y_val_time: dict, val_normal_hours: float,
+    smooth_window: int, min_duration: float,
+) -> "pd.DataFrame":
+    """
+    Full lead-time-vs-false-alarm-rate curve (W4.3's "most informative
+    figure") -- one row per swept threshold, with its resulting
+    false-alarm rate. plots.py consumes this directly.
+    """
+    # TODO
+    raise NotImplementedError

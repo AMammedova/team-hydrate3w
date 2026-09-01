@@ -1,0 +1,20 @@
+# NOTE: `data/*` + negation, not `data/` -- git cannot re-include a file
+# whose PARENT DIRECTORY is excluded (see git docs on gitignore
+# negation). `data/` alone silently breaks the download_data.sh
+# exception below; `data/*` excludes each child individually, which
+# negation CAN override. Same reasoning for results/*.
+data/*
+!data/download_data.sh
+
+results/*
+!results/.gitkeep
+
+checkpoints/
+*.pt
+*.ckpt
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.DS_Store
