@@ -49,7 +49,7 @@ Orijinal plan 4 nəfərlik idi və **Member 1 (data) bütün layihəni bloklayı
 
 | Üzv | Sahə | Sahib olduğu fayllar | Açıq stub sayı |
 |---|---|---|---|
-| **M1** | Data core — *pipeline bloklayıcısı* | `src/data/windowing.py`, `src/data/build_cache.py` | 4 |
+| **M1** | Data core — *pipeline bloklayıcısı* | `src/data/windowing.py`, `src/data/build_cache.py` | ✅ **0 — bitdi** (1 Sen) |
 | **M2** | Splits + data keyfiyyəti | `src/data/splits.py`, `availability.py`, `stats.py`, `download.py` | 6 |
 | **M3** | Baseline (XGBoost) | `src/baselines/*` | 4 |
 | **M4** | Deep models | `src/models/train_loop.py`, `losses.py`, `heads.py`, `profile.py` | 4 (SSL istisna) |
@@ -61,12 +61,18 @@ modulunda onun ətrafından dolanma (§0.5).
 
 ---
 
-## 2. M1 — Data core
+## 2. M1 — Data core ✅ BİTDİ (1 Sen)
 
 **Missiya:** xam 3W Parquet → kontraktı tam ödəyən `.npz` cache. Bütün digər
 dörd nəfər sənin çıxışını gözləyir, ona görə bu **Gün 1-in ən yüksək prioriteti**dir.
 
-**Açıq stublar:**
+> **Vəziyyət:** bütün stublar yazıldı və test edildi (44 test `windowing` üzrə,
+> cəmi 61). `DATA_FINDINGS.md` ölçmələrinə görə üç dizayn dəyişikliyi tətbiq
+> olundu: decimation 30× (pəncərə 30 dəqiqə), `failure_time` = transient onset,
+> NaN etiketli pəncərələr atılır. `build_cache` real data üzərində işə salınıb.
+> M1-in qalan işi: `availability.py` və `stats.py` (M2-yə keçdi, aşağı bax).
+
+**Açıq stublar (yazıldı):**
 - [`windowing.py:117`](src/data/windowing.py#L117) `VariableSelector.fit`
 - [`windowing.py:123`](src/data/windowing.py#L123) `VariableSelector.transform`
 - [`windowing.py:130`](src/data/windowing.py#L130) `mask_missing`

@@ -8,6 +8,14 @@ self-supervised pretraining vs. random init. See
 `team_responsibilities_all_members.md` §0.6 for why these are ordered,
 not co-equal.
 
+**Read before touching any module:** `DATA_FINDINGS.md` — what the real data
+actually contains, measured on 1 Sep 2026. Three of its findings change the
+plan: only 14 of the 57 real Event-9 instances have a transient phase and only
+3 reach blockage (so `failure_time` is the **transient** onset, not the
+blockage onset); the hydrate wells and the Normal wells are disjoint (so
+per-instance normalisation is mandatory, not cosmetic); and real transients run
+for hours, so windows are decimated 30× and cover 30 minutes, not 60 seconds.
+
 **Task split (5 members, current):** `TEAM_5_MEMBERS.md` — who owns which
 file, the open-stub list per member, the day-by-day schedule to the 7 Sep
 deadline, and the reduced scope (SSL pretraining is out; see its §0).
@@ -60,6 +68,20 @@ except the data path.
   `condition` includes `real_only` / `real_plus_sim` (Result 1, required)
   and `pretrained` / `random_init` (stretch goal, only if attempted). No
   number in the paper is ever typed by hand — everything comes from `results/`.
+- **Window units (changed after measuring the real data):** `WindowBuilder`
+  decimates the 1 Hz signal by `decimate=30` (one sample per 30 s, the mean of
+  that block's observed samples) and keeps `window_size=60` **samples**, so a
+  window covers **30 minutes** while `W` stays 60 and the TCN's receptive field
+  of 61 still covers it. The old `window_size=60` "seconds" default saw ~0.5%
+  of a typical transient — see `DATA_FINDINGS.md` §4.
+- **`failure_time` is the TRANSIENT onset**, not the blockage onset. Only 3 of
+  57 real instances reach blockage, so the statement's original definition
+  (DL8.3) is an n=3 metric; `blockage_time` is cached alongside so it can still
+  be reported as a secondary row. `DATA_FINDINGS.md` §3 and §7.
+- Windows whose label span contains an unlabeled (NaN) sample are **dropped**
+  by default (`nan_label_policy="drop"`). Every real instance has such spans
+  (median 11.2%); counting them as Normal would pad the false-alarm
+  denominator with time nobody vouched for.
 - Window labels: `NORMAL` / `TRANSIENT` / `ESTABLISHED`, assigned by
   `src.data.windowing.label_window()`, default rule `most_severe` — the
   most severe state present anywhere in the window. Mathematically
@@ -92,8 +114,9 @@ report/, presentation/, contribution_report.pdf
 |---|---|---|
 | 1 — Instance inventory | `src/data/inventory.py` | implemented + tested (8/8) |
 | 1 — Fake data generator | `src/data/make_fake_data.py` | implemented + verified against the contract |
-| 1 — Download / availability / cache build / stats figures | `src/data/download.py`, `availability.py`, `build_cache.py`, `stats.py` | stubs, TODO |
-| 1 — Windowing/labeling | `src/data/windowing.py` | `label_window()`, `is_monotonic_severity()` implemented + tested (12/12, incl. the any_transient bug fix and the most_severe/final_timestep equivalence proof); `build_windows()` TODO |
+| 1 — Cache build | `src/data/build_cache.py` | implemented — streams 801 instances, writes one `.npz` per instance + `cache_config.json` sidecar (frozen channel list, missing fractions, well→group map, drop counts) |
+| 1 — Download / availability / stats figures | `src/data/download.py`, `availability.py`, `stats.py` | stubs, TODO (the dataset itself is fetched by `data/download_data.sh`, which works) |
+| 1 — Windowing/labeling | `src/data/windowing.py` | implemented + tested (44/44): `label_window()`, `is_monotonic_severity()`, `frozen_run_mask()`, `mask_missing()` (causal ffill), `normalize_instance()`, `WindowBuilder.build_windows()`/`window_masks()`, `onset_times()`, `normal_seconds()` |
 | 1 — Grouped CV (nested train/val/test) | `src/data/splits.py` | interface frozen, TODO |
 | — — Shared contract | `src/contract.py` | implemented |
 | 2 — Multi-timescale features | `src/baselines/features.py` | interface frozen (mask-aware, 3 scales), TODO |
@@ -113,11 +136,16 @@ report/, presentation/, contribution_report.pdf
 ## Run today
 
 ```bash
-# Full test suite (29 tests, synthetic fixtures, no download needed)
+# Full test suite (61 tests, synthetic fixtures, no download needed)
 pytest tests/ -v
 
 # Fake data generator
 python src/data/make_fake_data.py --out data/fake/ --n_instances 40
+
+# Build the real windowed cache (needs data/3W from download_data.sh).
+# Writes one .npz per instance plus cache_config.json recording exactly
+# how it was built. --limit 3 --no-normal is a fast smoke test.
+python -m src.data.build_cache --root data/3W/dataset --out data/cache
 
 # Dataset summary once you've downloaded the real data -- fills in the
 # floor-justification numbers and real-well-count needed by the report
