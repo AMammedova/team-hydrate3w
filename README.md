@@ -8,6 +8,12 @@ self-supervised pretraining vs. random init. See
 `team_responsibilities_all_members.md` §0.6 for why these are ordered,
 not co-equal.
 
+**Task split (5 members, current):** `TEAM_5_MEMBERS.md` — who owns which
+file, the open-stub list per member, the day-by-day schedule to the 7 Sep
+deadline, and the reduced scope (SSL pretraining is out; see its §0).
+`team_responsibilities_all_members.md` remains the 4-member original and is
+still authoritative on the shared contract (§0.1–§0.3).
+
 Full spec: `DL_Project_Statement_Hydrate3W.docx` (repo root) — its
 **Addendum** section (including A.9, added after a second review) is the
 current source of truth wherever it disagrees with the body of the
