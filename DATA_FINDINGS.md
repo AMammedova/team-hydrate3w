@@ -222,3 +222,77 @@ augmentation, never a test-time substitute"*). Yalnız **aydın etiketlənmiş
 Hansı variant seçilirsə, `src/eval/alarm.py` və `metrics.py`-a toxunmadan
 işləyir — dəyişən yalnız `build_cache`-in `failure_time`-ı necə doldurmasıdır.
 Yəni qərar ucuzdur, amma **indi** verilməlidir.
+
+**Verilmiş qərar (1 Sen):** Variant A. `build_cache` `failure_time`-ı transient
+onset kimi yazır, `blockage_time`-ı ayrıca saxlayır.
+
+---
+
+## 8. Gözlənilməyən tapıntı №5 — hər quyu fərqli kanalları ölçür
+
+Bu, ilk cache build-i işlətdikdən sonra çıxdı: **801 instansdan 289-u sıfır
+istifadəyə yararlı pəncərə verdi.** Bütün WELL-00002 (209 instans) və
+WELL-00008 (57 instans) — yəni 9 normal quyudan 2-si və 3,646 normal saatdan
+**1,472-si** — tamamilə itdi.
+
+Səbəb kod bug-ı deyil. `max_missing_frac=0.5` ilə bütün instansların birləşməsi
+üzərində fit edilən kanal siyahısı **cəmi 5 kanal** saxladı
+(`P-JUS-CKGL, P-MON-CKP, P-TPT, T-JUS-CKP, T-TPT`) — çünki 27 kanaldan 9-u
+dataset boyu **%100 missing**-dir (`ESTADO-*` klapan vəziyyətləri, `P-JUS-BS`,
+`PT-P`, `QBS`, `P-MON-CKGL`, `P-MON-SDV-P`), bir neçəsi isə həddi bir tük fərqlə
+keçmir (`QGL` 0.569, `P-PDG` 0.584, `P-ANULAR` 0.656 — halbuki `P-PDG` daimi
+quyudibi manometrdir, fiziki olaraq ən maraqlı kanallardan biri).
+
+Amma əsas problem başqadır: **missingness qlobal deyil, quyuya xasdır.**
+
+```
+WELL-00002-də mövcud olan kanallar : P-ANULAR, P-PDG, P-TPT, T-TPT
+WELL-00008-də mövcud olan kanallar : P-JUS-CKGL
+```
+
+Qlobal 5 kanaldan WELL-00002-də 3-ü, WELL-00008-də 4-ü heç yoxdur → pəncərənin
+mask ortalaması `min_valid_frac=0.5`-dən aşağı düşür → bütün pəncərələr atılır.
+
+### Ölçülmüş trade-off (`tools/channel_availability.py`)
+
+Kanal dəsti = "normal quyuların ən azı K-sında mövcud olan kanallar":
+
+| Dəst | Kanal | Pozitiv quyu (7-dən) | Normal quyu (9-dan) | Normal saat |
+|---|---|---|---|---|
+| K≥8 → `P-TPT, T-TPT` | **2** | **7/7** | **8/9** | **3,040 h** |
+| K≥7 | 7 | 6/7 | 6/9 | 1,467 h |
+| K≥6 | 13 | 5/7 | 2/9 | 1,230 h |
+| K≥5 | 17 | 2/7 | 2/9 | 1,230 h |
+| K≥1 (hamısı) | 22 | 0/7 | 0/9 | 0 h |
+
+Yəni **kanal sayı ilə quyu əhatəsi bir-birinə ziddir** və 22 kanalın hamısını
+tələb etmək **heç bir quyu** buraxmır.
+
+### Qərar
+
+**Əsas arm: 2 kanal (`P-TPT`, `T-TPT`)** + mask kanalları. Bütün 7 pozitiv quyu
+və 3,040 normal saat qalır. Bu iki kanal TPT-nin (temperatur/təzyiq
+transduseri) təzyiq və temperaturudur — hidratın fiziki imzasının məhz olduğu
+yer, yəni bu, məcburiyyətdən doğan bəraət deyil, fiziki olaraq düzgün cütdür.
+100 saatda 1 yalan həyəcan büdcəsini kalibrləmək üçün normal saat lazımdır,
+ona görə 3,040 h vs 1,467 h fərqi həlledicidir.
+
+**İkinci arm: 7 kanal** (K≥7), həssaslıq analizi kimi — *"daha çox kanal, daha
+az quyu: hansı qazanır?"* Hesabatda güclü Discussion paraqrafı, itki deyil.
+
+`build_cache` artıq `--channels` seçimini qəbul edir, ona görə hər iki arm
+kod dəyişmədən qurulur:
+
+```bash
+python -m src.data.build_cache --root data/3W/dataset --out data/cache \
+    --channels P-TPT,T-TPT
+python -m src.data.build_cache --root data/3W/dataset --out data/cache_7ch \
+    --channels ESTADO-PXO,ESTADO-W2,ESTADO-XO,P-MON-CKP,P-PDG,P-TPT,T-TPT
+```
+
+### Hesabata mütləq düşməli
+
+Bu tapıntı **§2.3-ün missingness müzakirəsini əvəz etmir, kəskinləşdirir**:
+statement dataset boyu missingness-dən danışır, amma real problem *quyular
+arasında instrumentasiya fərqidir*. Bu, "unseen well" ümumiləşdirməsinin niyə
+çətin olduğuna dair ayrıca, dürüst bir izahdır və Limitations bölməsinə düşür.

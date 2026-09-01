@@ -77,6 +77,9 @@ DEFAULT_CONFIG: dict = {
     # Normal wells are disjoint in this dataset, so raw sensor level alone
     # separates the classes (DATA_FINDINGS.md §2).
     "normalize": "warmup",
+    # Explicit channel list; None means "use max_missing_frac". See the
+    # override block in build_cache() for why this is normally set.
+    "channels": None,
     "include_simulated": True,
     "include_normal": True,
 }
@@ -158,6 +161,28 @@ def build_cache(root: str, out_dir: str, config: dict | None = None) -> pd.DataF
                 continue
             yield inst
     selector.fit(_fit_stream())
+
+    # An explicit channel list overrides the missing-fraction threshold.
+    #
+    # WHY THIS OVERRIDE EXISTS (DATA_FINDINGS.md §8): different wells in this
+    # dataset instrument different channels. Fitting a single list on the union
+    # at max_missing_frac=0.5 kept 5 channels, and 289 of 801 instances -- all
+    # of WELL-00002 and WELL-00008, i.e. 1,472 of 3,646 Normal operating hours
+    # -- then lost every window to min_valid_frac, because 3 of those 5
+    # channels simply do not exist in those wells. Channel breadth and well
+    # coverage genuinely trade off here, so the set is a team decision made
+    # against tools/channel_availability.py's table, not a threshold's
+    # accident. Pass it explicitly and the sidecar records which one was used.
+    override = cfg.get("channels")
+    if override:
+        unknown = [c for c in override if c not in selector.missing_frac_]
+        if unknown:
+            raise ValueError(
+                f"channels {unknown} do not exist in this dataset; available: "
+                f"{sorted(selector.missing_frac_)}"
+            )
+        selector._kept_columns = list(override)
+        logger.info("channel list OVERRIDDEN by config: %s", override)
     kept = selector.kept_columns
     logger.info("kept %d channels: %s", len(kept), kept)
 
@@ -280,6 +305,11 @@ def _cli() -> None:
                         choices=["warmup", "instance_robust", "none"])
     parser.add_argument("--min-valid-frac", type=float, default=DEFAULT_CONFIG["min_valid_frac"])
     parser.add_argument("--max-missing-frac", type=float, default=DEFAULT_CONFIG["max_missing_frac"])
+    parser.add_argument("--channels", default=None,
+                        help="comma-separated channel list to pin explicitly, overriding "
+                             "--max-missing-frac. Use tools/channel_availability.py to pick "
+                             "it; see DATA_FINDINGS.md sec 8 for why the threshold alone "
+                             "is not enough.")
     parser.add_argument("--fit-wells", default=None,
                         help="comma-separated well ids the channel list may be fit on "
                              "(the strict per-fold path; default: every instance)")
@@ -300,6 +330,7 @@ def _cli() -> None:
         "min_valid_frac": args.min_valid_frac,
         "max_missing_frac": args.max_missing_frac,
         "include_normal": not args.no_normal,
+        "channels": [c.strip() for c in args.channels.split(",")] if args.channels else None,
         "fit_wells": set(args.fit_wells.split(",")) if args.fit_wells else None,
         "limit": args.limit,
     }
