@@ -519,9 +519,20 @@ class GroupedKFoldSplitter:
                                   DATA_FINDINGS.md §2.3). Below ~300 h a
                                   1-per-100-h budget is not measurable.
 
-        `test_normal_hours` counts Normal-Operation wells only -- the same
-        instances src/eval/thresholds.py calibrates on -- not the Normal
-        stretches inside hydrate instances.
+        `test_normal_hours` sums `normal_hours` over the test wells that
+        carry NO positive window. That is deliberately not the same set as
+        "the class-0 folder": 43 of the 57 real Event-9 instances never
+        reach a positive phase (DATA_FINDINGS.md §3), and build_cache
+        records no class-folder flag (every file is loaded with
+        event_code=9), so the cache cannot tell a class-0 recording from a
+        quiet class-9 one. Both are all-Normal recordings, so both are
+        legitimate false-alarm denominators -- the quiet hydrate-well ones
+        are simply the harder negatives.
+
+        Normal stretches INSIDE a positive well are excluded, which is the
+        conservative direction: it can only understate the denominator,
+        never inflate it. If src/eval/thresholds.py wants those hours too,
+        that is a deliberate widening to agree on, not a silent one.
         """
         table = self._well_table(y, groups, is_sim, instances, well_hours)
         groups_arr = np.asarray(groups)
