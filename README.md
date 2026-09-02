@@ -115,7 +115,7 @@ report/, presentation/, contribution_report.pdf
 | 1 — Instance inventory | `src/data/inventory.py` | implemented + tested (8/8) |
 | 1 — Fake data generator | `src/data/make_fake_data.py` | implemented + verified against the contract |
 | 1 — Cache build | `src/data/build_cache.py` | implemented — streams 801 instances, writes one `.npz` per instance + `cache_config.json` sidecar (frozen channel list, missing fractions, well→group map, drop counts) |
-| 1 — Download / availability / stats figures | `src/data/download.py`, `availability.py`, `stats.py` | stubs, TODO (the dataset itself is fetched by `data/download_data.sh`, which works) |
+| 1 — Download / availability / stats figures | `src/data/download.py`, `availability.py`, `stats.py` | implemented + tested (`download()`, `variable_availability_table()`, `transient_duration_histogram()`, `annotated_trace_figure()`) |
 | 1 — Windowing/labeling | `src/data/windowing.py` | implemented + tested (44/44): `label_window()`, `is_monotonic_severity()`, `frozen_run_mask()`, `mask_missing()` (causal ffill), `normalize_instance()`, `WindowBuilder.build_windows()`/`window_masks()`, `onset_times()`, `normal_seconds()` |
 | 1 — Grouped CV (nested train/val/test) | `src/data/splits.py` | interface frozen, TODO |
 | — — Shared contract | `src/contract.py` | implemented |
@@ -131,12 +131,12 @@ report/, presentation/, contribution_report.pdf
 | 4 — Alarm definition + lead time | `src/eval/alarm.py` | implemented + tested (9/9, incl. a causality regression test) |
 | 4 — Threshold selection | `src/eval/thresholds.py` | interface frozen (target_far=1/100h default), TODO |
 | 4 — Aggregation | `src/eval/aggregate.py` | `summarize_folds` implemented; `to_latex_table` TODO |
-| 4 — Plots | `src/eval/plots.py` | stubs for all four required figures, TODO |
+| 4 — Plots | `src/eval/plots.py` | `plot_annotated_trace` implemented (Member 1, built on `src/data/stats.py`); `plot_lead_time_vs_false_alarm_rate`, `plot_per_well_lead_time_box` (Member 5), `plot_reliability_diagram` (Member 3) still stubs |
 
 ## Run today
 
 ```bash
-# Full test suite (61 tests, synthetic fixtures, no download needed)
+# Full test suite (75 tests, synthetic fixtures, no download needed)
 pytest tests/ -v
 
 # Fake data generator
@@ -150,6 +150,15 @@ python -m src.data.build_cache --root data/3W/dataset --out data/cache
 # Dataset summary once you've downloaded the real data -- fills in the
 # floor-justification numbers and real-well-count needed by the report
 bash run_all.sh --root data/3W/dataset --event 9
+
+# Member 1's dataset tables + figures (results/variable_availability.csv,
+# figures/transient_duration_hist.png, figures/annotated_trace.png)
+python -m tools.m1_dataset_figures --root data/3W/dataset
+
+# Member 1's cache sensitivity sweep (label_rule / channel set /
+# nan_label_policy) -> results/m1_sensitivity_sweep.csv. Arms whose cache
+# directory already exists are summarised, not rebuilt; --rebuild forces it.
+python -m tools.m1_sensitivity_sweep --root data/3W/dataset
 ```
 
 ## Dataset & licensing
