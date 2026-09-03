@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.contract import ESTABLISHED, NORMAL, TRANSIENT
 from src.data.splits import (
+    load_cache,
     LEAVE_ONE_WELL_OUT,
     GroupedKFoldSplitter,
     load_cache_index,
@@ -198,6 +199,30 @@ def test_normal_hours_balanced_above_the_far_floor():
     assert report["test_normal_hours"].sum() == pytest.approx(sum(NORMAL_HOURS.values()), abs=0.5)
 
 
+def test_validation_also_clears_the_hour_floor():
+    """
+    Module 8 selects the threshold on VALIDATION Normal hours, so the floor
+    has to hold on that side too. A proportional val slice does not give
+    it: on the real cache that left one fold with 4.0 validation hours.
+    """
+    y, groups, instances, is_sim, hours = make_dataset()
+    report = GroupedKFoldSplitter(n_splits=3, min_val_normal_hours=300.0).fold_report(
+        y, groups, is_sim=is_sim, instances=instances, well_hours=hours
+    )
+    assert (report["val_normal_hours"] >= 300.0).all()
+
+
+def test_validation_never_takes_every_normal_well_from_training():
+    """An absurd floor must not empty the training side of Normal wells."""
+    y, groups, instances, is_sim, hours = make_dataset()
+    splitter = GroupedKFoldSplitter(n_splits=3, min_val_normal_hours=1e9)
+    for spec in splitter.iter_folds(
+        y, groups, is_sim=is_sim, instances=instances, well_hours=hours
+    ):
+        train_normal = [w for w in spec.train_wells if w in NORMAL_HOURS]
+        assert train_normal
+
+
 def test_thin_fold_is_reported_not_silently_accepted():
     """A fold below the floor must be loud -- strict=True turns it fatal."""
     y, groups, instances, is_sim, hours = make_dataset()
@@ -209,7 +234,7 @@ def test_thin_fold_is_reported_not_silently_accepted():
 def test_too_many_folds_is_refused():
     y, groups, instances, is_sim, hours = make_dataset()
     splitter = GroupedKFoldSplitter(n_splits=8)  # only 7 positive wells exist
-    with pytest.raises(ValueError, match="only 7 wells carry a positive window"):
+    with pytest.raises(ValueError, match="carry a positive window"):
         list(splitter.iter_folds(y, groups, is_sim=is_sim, instances=instances, well_hours=hours))
 
 
@@ -261,8 +286,8 @@ def test_repeats_reshuffle_the_assignment():
     assert r0 != r1
 
 
-def test_fraction_val_mode_keeps_val_out_of_test():
-    splitter = GroupedKFoldSplitter(n_splits=3, val_mode="fraction", val_frac=0.3)
+def test_nested_val_mode_keeps_val_out_of_test():
+    splitter = GroupedKFoldSplitter(n_splits=3, val_mode="nested", val_frac=0.3)
     for spec in folds_of(splitter):
         assert not set(spec.val_wells) & set(spec.test_wells)
         assert spec.val_wells
@@ -301,20 +326,31 @@ def test_fold_report_event_total_matches_the_dataset():
 # --------------------------------------------------------------------------
 
 
-def test_load_cache_index_reads_metadata_and_sums_hours(tmp_path):
-    for i, (well, group, hours) in enumerate(
-        [("WELL-00001", 0, 10.0), ("WELL-00001", 0, 5.0), ("WELL-00042", 1, 1.0)]
-    ):
+CACHE_INSTANCES = [
+    # (filename stem, well, group, normal hours, transient onset)
+    ("instB", "WELL-00001", 0, 10.0, np.nan),
+    ("instA", "WELL-00001", 0, 5.0, np.nan),
+    ("instC", "WELL-00042", 1, 1.0, 4200.0),
+]
+
+
+def write_cache(tmp_path, windows_per_instance=4):
+    """
+    A cache in build_cache.py's on-disk format. Every value in X is the
+    instance's own index, so a misaligned load is detectable by value.
+    """
+    for i, (stem, _well, group, hours, onset) in enumerate(CACHE_INSTANCES):
+        n = windows_per_instance
         np.savez_compressed(
-            tmp_path / f"inst{i}.npz",
-            X=np.zeros((4, 2, 60), dtype="float32"),
-            mask=np.ones((4, 2, 60), dtype="uint8"),
-            y=np.zeros(4, dtype="int64"),
-            group=np.full(4, group, dtype="int64"),
-            inst_id=np.full(4, i, dtype="int64"),
-            t_end=np.arange(4, dtype="float64"),
-            is_sim=np.zeros(4, dtype="uint8"),
-            failure_time=np.float64("nan"),
+            tmp_path / f"{stem}.npz",
+            X=np.full((n, 2, 60), float(i), dtype="float32"),
+            mask=np.ones((n, 2, 60), dtype="uint8"),
+            y=np.zeros(n, dtype="int64"),
+            group=np.full(n, group, dtype="int64"),
+            inst_id=np.full(n, i, dtype="int64"),
+            t_end=np.arange(n, dtype="float64"),
+            is_sim=np.zeros(n, dtype="uint8"),
+            failure_time=np.float64(onset),
             blockage_time=np.float64("nan"),
             normal_hours=np.float64(hours),
         )
@@ -322,6 +358,9 @@ def test_load_cache_index_reads_metadata_and_sums_hours(tmp_path):
         json.dumps({"group_map": {"WELL-00001": 0, "WELL-00042": 1}}), encoding="utf8"
     )
 
+
+def test_load_cache_index_reads_metadata_and_sums_hours(tmp_path):
+    write_cache(tmp_path)
     idx = load_cache_index(tmp_path)
     assert len(idx) == 12
     assert idx.hours_by_well == {0: 15.0, 1: 1.0}
@@ -331,3 +370,119 @@ def test_load_cache_index_reads_metadata_and_sums_hours(tmp_path):
 def test_load_cache_index_refuses_an_empty_cache(tmp_path):
     with pytest.raises(FileNotFoundError, match="build_cache"):
         load_cache_index(tmp_path)
+
+
+def test_per_instance_scalars_are_broadcast_to_every_window(tmp_path):
+    """failure_time is one number per instance on disk, one per row here."""
+    write_cache(tmp_path)
+    idx = load_cache_index(tmp_path)
+    onset_of = {i: onset for i, (_s, _w, _g, _h, onset) in enumerate(CACHE_INSTANCES)}
+    for inst, onset in onset_of.items():
+        rows = idx.failure_time[idx.inst_id == inst]
+        assert len(rows) == 4
+        if np.isnan(onset):
+            assert np.isnan(rows).all()
+        else:
+            assert (rows == onset).all()
+    assert np.isnan(idx.blockage_time).all()
+
+
+def test_load_cache_returns_X_aligned_with_the_metadata(tmp_path):
+    """
+    The alignment guarantee behind every fold index: row r of X belongs to
+    the instance metadata row r says it does. The fixture encodes the
+    instance index into X's values, so a reordering fails here loudly --
+    which is the whole point, since in real use it would fail silently.
+    """
+    write_cache(tmp_path)
+    X, mask, idx = load_cache(tmp_path)
+    assert X.shape == (12, 2, 60)
+    assert mask.shape == X.shape
+    assert len(idx) == len(X)
+    for r in range(len(X)):
+        assert X[r].min() == X[r].max() == float(idx.inst_id[r])
+
+
+def test_load_cache_row_order_is_sorted_filenames_not_write_order(tmp_path):
+    """instB was written first; instA must still come first when loaded."""
+    write_cache(tmp_path)
+    _X, _mask, idx = load_cache(tmp_path)
+    assert idx.files == ["instA", "instB", "instC"]
+
+
+MULTI_WELL_CACHE = [
+    # (stem, group, normal hours, has a positive phase)
+    ("posA", 1, 0.0, True),
+    ("posB", 2, 0.0, True),
+    ("normA", 10, 400.0, False),
+    ("normB", 11, 350.0, False),
+]
+
+
+def write_multi_well_cache(tmp_path, n=6):
+    for i, (stem, group, hours, positive) in enumerate(MULTI_WELL_CACHE):
+        y = np.zeros(n, dtype="int64")
+        if positive:
+            y[-2:] = TRANSIENT
+        np.savez_compressed(
+            tmp_path / f"{stem}.npz",
+            X=np.full((n, 2, 60), float(i), dtype="float32"),
+            mask=np.ones((n, 2, 60), dtype="uint8"),
+            y=y,
+            group=np.full(n, group, dtype="int64"),
+            inst_id=np.full(n, i, dtype="int64"),
+            t_end=np.arange(n, dtype="float64"),
+            is_sim=np.zeros(n, dtype="uint8"),
+            failure_time=np.float64(100.0 if positive else "nan"),
+            blockage_time=np.float64("nan"),
+            normal_hours=np.float64(hours),
+        )
+
+
+def test_fold_indices_select_the_right_rows_from_a_real_cache(tmp_path):
+    """
+    End-to-end: cache on disk -> load_cache -> split() -> row indices.
+    This is the path M3 and M4 actually take, so it is the one that has to
+    hold: indices from the metadata must select the matching rows of X.
+    """
+    write_multi_well_cache(tmp_path)
+    X, mask, idx = load_cache(tmp_path)
+    splitter = GroupedKFoldSplitter(n_splits=2, min_test_normal_hours=0.0)
+
+    folds = list(
+        splitter.split(
+            X, idx.y, idx.group, is_sim=idx.is_sim,
+            instances=idx.inst_id, well_hours=idx.hours_by_well,
+        )
+    )
+    assert len(folds) == 2
+
+    for train_idx, val_idx, test_idx in folds:
+        # every row is used exactly once, and X/mask index the same rows
+        assert len(train_idx) + len(val_idx) + len(test_idx) == len(X)
+        assert mask[test_idx].shape[0] == len(test_idx)
+        # a test fold holds whole wells, and never a well seen in training
+        test_groups = set(idx.group[test_idx])
+        assert test_groups
+        assert not test_groups & set(idx.group[train_idx])
+        # each test fold carries at least one positive event
+        assert (idx.y[test_idx] > 0).any()
+        # rows still carry their own instance's X values
+        for r in test_idx:
+            assert X[r].min() == float(idx.inst_id[r])
+
+
+def test_too_few_positive_wells_is_refused(tmp_path):
+    """One positive well cannot support two folds -- say so, don't improvise."""
+    write_cache(tmp_path)
+    _X, _mask, idx = load_cache(tmp_path)
+    y = idx.y.copy()
+    y[idx.group == 1] = TRANSIENT
+    splitter = GroupedKFoldSplitter(n_splits=2)
+    with pytest.raises(ValueError, match="carry a positive window"):
+        list(
+            splitter.split(
+                None, y, idx.group, is_sim=idx.is_sim,
+                instances=idx.inst_id, well_hours=idx.hours_by_well,
+            )
+        )

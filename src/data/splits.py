@@ -39,13 +39,24 @@ out of that fold's TRAINING wells only -- never its test wells -- because
 Module 7's early stopping and Module 8's threshold/smoothing selection
 both need a validation set that is not the test set.
 
-With 7 positive wells, sampling `val_frac` of the training wells at
-random regularly produces a validation fold with ZERO positive events,
-which makes early stopping on PR-AUC undefined. The default therefore
-rotates: fold i validates on fold (i+1)'s wells. That is disjoint from
-test by construction, drawn only from training wells, and inherits the
-same event/hour balancing the test folds got. `val_mode="fraction"` keeps
-the original random-sample behaviour for comparison.
+Validation carries two jobs that need different things, so
+`val_mode="nested"` (the default) picks its wells two different ways:
+
+  * EARLY STOPPING needs positive events. Sampling `val_frac` of the
+    training wells at random regularly yields zero of them across 7
+    positive wells, which leaves PR-AUC undefined -- so positive wells
+    are taken as one event-balanced slice of the training pool.
+  * THRESHOLD SELECTION needs Normal HOURS: Module 8 tunes for 1 alarm
+    per 100 h on validation. A proportional slice does not guarantee
+    them -- on the real cache it left one fold with 4.0 validation hours
+    -- so Normal wells are added smallest-first until
+    `min_val_normal_hours` is met, and no further.
+
+`val_mode="rotate"` (fold i validates on fold i+1's wells) is kept
+because it is simpler to explain, but at k=3 it spends a full third of
+the data on validation and leaves the model less training data than
+validation data -- measured on the real cache: 12.4k train vs 18.3k val
+windows. Prefer "nested" unless you have a reason not to.
 
 SIMULATED INSTANCES
 -------------------
@@ -98,12 +109,37 @@ class CacheIndex:
     group: np.ndarray           # (N,) well group id
     inst_id: np.ndarray         # (N,) instance id
     is_sim: np.ndarray          # (N,) 1 for simulated/drawn windows
+    t_end: np.ndarray           # (N,) window end time, seconds from instance start
+    failure_time: np.ndarray    # (N,) transient onset of this window's instance
+    blockage_time: np.ndarray   # (N,) blockage onset, NaN in all but 3 instances
     hours_by_well: dict         # group id -> Normal hours summed over instances
     well_of_group: dict = field(default_factory=dict)   # group id -> "WELL-000NN"
     files: list = field(default_factory=list)           # instance order on disk
+    n_per_file: list = field(default_factory=list)      # windows contributed by each
 
     def __len__(self) -> int:
         return int(len(self.y))
+
+
+def _cache_files(cache_dir: str | Path) -> list[Path]:
+    """
+    THE row order of a cache, defined in exactly one place.
+
+    Every index this module hands out (train_idx/val_idx/test_idx) is an
+    offset into arrays concatenated in this order. If a caller loads X in
+    a different order, the indices still "work" -- they just point at the
+    wrong rows, silently, and every downstream number is wrong without a
+    single error being raised. So X and the metadata must come from the
+    same enumeration: load_cache() and load_cache_index() both call this.
+    """
+    cache = Path(cache_dir)
+    files = sorted(cache.glob("*.npz"))
+    if not files:
+        raise FileNotFoundError(
+            f"no .npz files in {cache} -- run `python -m src.data.build_cache` "
+            f"first (or point at a fake-data cache if the real one isn't built yet)"
+        )
+    return files
 
 
 def load_cache_index(cache_dir: str | Path) -> CacheIndex:
@@ -113,28 +149,32 @@ def load_cache_index(cache_dir: str | Path) -> CacheIndex:
     `hours_by_well` sums each instance's `normal_hours` scalar (seconds
     labeled Normal / 3600) per well; it is the denominator behind the
     `test_normal_hours` column of fold_report().
-    """
-    cache = Path(cache_dir)
-    files = sorted(p for p in cache.glob("*.npz"))
-    if not files:
-        raise FileNotFoundError(
-            f"no .npz files in {cache} -- run `python -m src.data.build_cache` "
-            f"first (or point at a fake-data cache if the real one isn't built yet)"
-        )
 
-    ys, groups, insts, sims = [], [], [], []
+    `failure_time` and `blockage_time` are per-INSTANCE scalars on disk;
+    they are broadcast to every window of their instance here so Module 8
+    can compute a lead time by row without re-opening the cache (and
+    without re-deriving the row order -- see _cache_files).
+    """
+    files = _cache_files(cache_dir)
+
+    ys, groups, insts, sims, tends, fails, blocks, counts = [], [], [], [], [], [], [], []
     hours_by_well: dict[int, float] = {}
     for path in files:
         with np.load(path) as z:
+            n = int(len(z["y"]))
             ys.append(z["y"])
             groups.append(z["group"])
             insts.append(z["inst_id"])
             sims.append(z["is_sim"])
+            tends.append(z["t_end"])
+            fails.append(np.full(n, float(z["failure_time"]), dtype="float64"))
+            blocks.append(np.full(n, float(z["blockage_time"]), dtype="float64"))
+            counts.append(n)
             g = int(z["group"][0])
             hours_by_well[g] = hours_by_well.get(g, 0.0) + float(z["normal_hours"])
 
     well_of_group: dict[int, str] = {}
-    sidecar = cache / "cache_config.json"
+    sidecar = Path(cache_dir) / "cache_config.json"
     if sidecar.exists():
         group_map = json.loads(sidecar.read_text(encoding="utf8")).get("group_map", {})
         well_of_group = {int(v): k for k, v in group_map.items()}
@@ -144,10 +184,54 @@ def load_cache_index(cache_dir: str | Path) -> CacheIndex:
         group=np.concatenate(groups),
         inst_id=np.concatenate(insts),
         is_sim=np.concatenate(sims),
+        t_end=np.concatenate(tends),
+        failure_time=np.concatenate(fails),
+        blockage_time=np.concatenate(blocks),
         hours_by_well=hours_by_well,
         well_of_group=well_of_group,
         files=[p.stem for p in files],
+        n_per_file=counts,
     )
+
+
+def load_cache(cache_dir: str | Path) -> tuple[np.ndarray, np.ndarray, CacheIndex]:
+    """
+    Load `X`, `mask` and the matching CacheIndex in ONE guaranteed row order.
+
+        X, mask, idx = load_cache("data/cache")
+        for train_idx, val_idx, test_idx in splitter.split(
+            X, idx.y, idx.group, is_sim=idx.is_sim,
+            instances=idx.inst_id, well_hours=idx.hours_by_well,
+        ):
+            model.fit(X[train_idx], mask[train_idx], idx.y[train_idx])
+
+    Use this rather than globbing the cache yourself: fold indices are
+    positions in this concatenation, and a different enumeration order
+    misaligns every row without raising anything.
+
+    X is `[N, C, W]` float32, channels-first (contract §0.1) -- roughly
+    100 MB for the real 5-channel cache, so it fits in memory; nothing
+    here streams.
+    """
+    files = _cache_files(cache_dir)
+    index = load_cache_index(cache_dir)
+
+    Xs, masks = [], []
+    for path in files:
+        with np.load(path) as z:
+            Xs.append(z["X"])
+            masks.append(z["mask"])
+
+    X = np.concatenate(Xs)
+    mask = np.concatenate(masks)
+    if len(X) != len(index) or len(mask) != len(index):
+        raise AssertionError(
+            f"cache is inconsistent: X has {len(X)} rows, mask {len(mask)}, metadata "
+            f"{len(index)} -- rebuild the cache rather than indexing into this"
+        )
+    if X.ndim != 3:
+        raise AssertionError(f"expected channels-first [N, C, W], got shape {X.shape}")
+    return X, mask, index
 
 
 # --------------------------------------------------------------------------
@@ -211,6 +295,33 @@ def _balanced_fold_assignment(
     return folds
 
 
+def _val_normal_wells(
+    pool: Sequence, hours: Mapping, floor: float, rng: np.random.Generator
+) -> list:
+    """
+    Pick validation Normal wells by HOURS, smallest first, until `floor` is
+    reached -- and never take the last Normal well away from training.
+
+    Smallest-first is deliberate. Taking one large well would clear the
+    floor in a single pick but hand validation most of the fold's Normal
+    windows; the small wells clear it while leaving the bulk for training,
+    and they make the validation set more diverse at the same time.
+    """
+    pool = list(pool)
+    if len(pool) <= 1:
+        return []
+    ordered = sorted(rng.permutation(np.array(pool, dtype=object)),
+                     key=lambda w: float(hours.get(w, 0.0)))
+    picked: list = []
+    total = 0.0
+    for well in ordered[:-1]:          # keep at least one Normal well in train
+        if total >= floor:
+            break
+        picked.append(well)
+        total += float(hours.get(well, 0.0))
+    return picked
+
+
 class GroupedKFoldSplitter:
     """
     Well-level nested CV splitter for the 3W hydrate task.
@@ -227,13 +338,19 @@ class GroupedKFoldSplitter:
         Repeats of the whole scheme with a reshuffled assignment. Reduced
         to 1 for the 7 Sep deadline (TEAM_5_MEMBERS.md §0).
     val_mode
-        "rotate" (default): fold i validates on fold (i+1)'s wells.
-        "fraction": sample `val_frac` of the training wells at random.
+        "nested" (default): partition this fold's training wells into
+        round(1/val_frac) balanced parts and validate on one of them.
+        "rotate": fold i validates on fold (i+1)'s wells -- simpler, but
+        at k=3 it leaves the model less training data than validation data.
     min_test_normal_hours
         Fold-level sanity floor for the false-alarm denominator. A fold
         below this cannot support a 1-per-100-h budget; the splitter warns
         (or raises, with `strict=True`) instead of letting M5 compute a
         threshold on 46 hours of Normal.
+    min_val_normal_hours
+        The same floor on the VALIDATION side, where Module 8 actually
+        selects the threshold. Only used by val_mode="nested"; it is what
+        decides how many Normal wells validation borrows from training.
     include_sim_in_train
         False reproduces the `real_only` condition of Result 1; True the
         `real_plus_sim` condition. Simulated wells are never eligible for
@@ -247,13 +364,14 @@ class GroupedKFoldSplitter:
         val_frac: float = 0.2,
         group_col: str = "well_id",
         random_state: int = 42,
-        val_mode: str = "rotate",
+        val_mode: str = "nested",
         min_test_normal_hours: float = 300.0,
+        min_val_normal_hours: float = 300.0,
         include_sim_in_train: bool = True,
         strict: bool = False,
     ) -> None:
-        if val_mode not in ("rotate", "fraction"):
-            raise ValueError(f"val_mode must be 'rotate' or 'fraction', got {val_mode!r}")
+        if val_mode not in ("nested", "rotate"):
+            raise ValueError(f"val_mode must be 'nested' or 'rotate', got {val_mode!r}")
         self.n_splits = n_splits
         self.n_repeats = n_repeats
         self.val_frac = val_frac
@@ -261,6 +379,7 @@ class GroupedKFoldSplitter:
         self.random_state = random_state
         self.val_mode = val_mode
         self.min_test_normal_hours = min_test_normal_hours
+        self.min_val_normal_hours = min_val_normal_hours
         self.include_sim_in_train = include_sim_in_train
         self.strict = strict
 
@@ -332,7 +451,7 @@ class GroupedKFoldSplitter:
             )
         if self.n_splits > n_positive_wells:
             raise ValueError(
-                f"n_splits={self.n_splits} but only {n_positive_wells} wells carry a "
+                f"n_splits={self.n_splits} but only {n_positive_wells} well(s) carry a "
                 f"positive window -- at least one test fold would contain zero "
                 f"positives and its event recall would be undefined. Lower n_splits "
                 f"(DATA_FINDINGS.md §6 recommends 3) or use LEAVE_ONE_WELL_OUT."
@@ -383,14 +502,27 @@ class GroupedKFoldSplitter:
                 if self.val_mode == "rotate":
                     val_wells = fold_wells[(i + 1) % k]
                 else:
+                    # nested: spend a slice of THIS fold's training pool on
+                    # validation. The two populations are chosen by different
+                    # rules because they answer different questions:
+                    #   positives  -> early stopping needs SOME events, so an
+                    #                 event-balanced 1/m slice is enough;
+                    #   normals    -> threshold selection needs enough HOURS to
+                    #                 resolve 1 alarm per 100 h, so wells are
+                    #                 added until the floor is met rather than
+                    #                 by proportion. Taking a proportional
+                    #                 slice instead left one real fold with
+                    #                 4.0 validation hours.
                     pool = [w for j, g in enumerate(fold_wells) if j != i for w in g]
                     pool_pos = [w for w in pool if w in positive_set]
                     pool_norm = [w for w in pool if w not in positive_set]
-                    n_pos = min(len(pool_pos), max(1, round(self.val_frac * len(pool_pos))))
-                    n_norm = min(len(pool_norm), max(1, round(self.val_frac * len(pool_norm))))
-                    picked = list(rng.choice(pool_pos, size=n_pos, replace=False))
-                    picked += list(rng.choice(pool_norm, size=n_norm, replace=False))
-                    val_wells = tuple(sorted(picked, key=str))
+                    m = max(2, int(round(1.0 / self.val_frac)))
+                    m = min(m, max(2, len(pool_pos)))
+                    val_pos = _balanced_fold_assignment(pool_pos, pos_weight, m, rng)[0]
+                    val_norm = _val_normal_wells(
+                        pool_norm, hour_weight, self.min_val_normal_hours, rng
+                    )
+                    val_wells = tuple(sorted(set(val_pos) | set(val_norm), key=str))
 
                 held_out = set(test_wells) | set(val_wells)
                 train_wells = set(real.index) - held_out
@@ -599,7 +731,7 @@ def _cli() -> None:
         "--n-splits", type=int, default=3, help="folds, or -1 for leave-one-well-out"
     )
     parser.add_argument("--n-repeats", type=int, default=1)
-    parser.add_argument("--val-mode", default="rotate", choices=["rotate", "fraction"])
+    parser.add_argument("--val-mode", default="nested", choices=["nested", "rotate"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", default="results/fold_report.csv")
     args = parser.parse_args()
