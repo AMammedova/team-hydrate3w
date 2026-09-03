@@ -1,0 +1,393 @@
+\documentclass[conference]{IEEEtran}
+
+% ---- Packages ----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{url}
+\usepackage{xcolor}
+
+% For \input-ing auto-generated LaTeX tables
+\usepackage{multirow}
+
+% Path for figures
+\graphicspath{{../figures/}}
+
+% ---- Helpers ----
+% Placeholder macro for sections awaiting content from team members
+\newcommand{\placeholder}[1]{\textcolor{red}{\textbf{[PLACEHOLDER:} #1\textbf{]}}}
+
+\begin{document}
+
+% ====================================================================
+% TITLE — M5 writes
+% ====================================================================
+\title{Early Warning of Hydrate Formation in Offshore Well Service Lines:\\
+A Comparison of XGBoost, TCN, and GRU at Matched False-Alarm Budgets}
+
+% ====================================================================
+% AUTHORS — all five members
+% ====================================================================
+\author{
+\IEEEauthorblockN{Member~1\IEEEauthorrefmark{1},
+Member~2\IEEEauthorrefmark{1},
+Member~3\IEEEauthorrefmark{1},
+Member~4\IEEEauthorrefmark{1},
+Member~5\IEEEauthorrefmark{1}}
+\IEEEauthorblockA{\IEEEauthorrefmark{1}%
+DLE-AI-202, Cohort I 2026 · Track 2\\
+\placeholder{University / Institution Name}\\
+\placeholder{member emails}}
+}
+
+\maketitle
+
+% ====================================================================
+% ABSTRACT — M5 writes
+% ====================================================================
+\begin{abstract}
+Hydrate formation in offshore well service lines can cause costly shutdowns
+and safety hazards if not detected early. This study compares three models
+--- XGBoost (feature-engineered baseline), a Temporal Convolutional Network
+(TCN), and a Gated Recurrent Unit (GRU) --- for early warning of hydrate
+events using Petrobras's 3W Dataset~2.0.0 (Event~9). All three models are
+evaluated at a matched false-alarm budget of one alarm per 100 operating
+hours, with lead time (time from first alarm to annotated transient onset)
+as the headline metric. Each model is trained under two conditions:
+real-only and real-plus-simulated data. We employ grouped cross-validation
+with well-level splits to prevent data leakage. Our results show
+\placeholder{M5: fill after S3 FREEZE — headline numbers: which model, which
+condition, median lead time, event recall}.
+
+Reproduction: all code, data processing, and evaluation are available at
+\url{https://github.com/AMammedova/team-hydrate3w}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+hydrate formation, early warning, time series classification,
+temporal convolutional network, gated recurrent unit, 3W dataset
+\end{IEEEkeywords}
+
+% ====================================================================
+% I. INTRODUCTION — M1 writes
+% ====================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+% TODO (M1): Write the Introduction section. Should cover:
+% - Motivation: hydrate formation in offshore wells, safety & economic impact
+% - The 3W Dataset as a benchmark for early warning in O&G
+% - Brief summary of Event 9 (hydrate in service line)
+% - Research question: can DL models provide earlier warning than classical baselines?
+% - Paper structure overview (one sentence per section)
+
+\placeholder{M1 writes Introduction: motivation, 3W dataset context, research
+question, paper structure. Include: 57 real Event-9 instances, only 14 with
+transient phase, only 3 reaching blockage. Emphasize that this makes the
+problem harder, not easier — and that the headline metric uses transient
+onset (Variant A from DATA\_FINDINGS.md §7).}
+
+
+% ====================================================================
+% II. DATASET — M1 writes
+% ====================================================================
+\section{Dataset}
+\label{sec:dataset}
+
+% TODO (M1): Write the Dataset section. Must include all numbers from
+% DATA_FINDINGS.md and TEAM_5_MEMBERS.md §2:
+
+\placeholder{M1 writes Dataset section. Required content:}
+
+\begin{itemize}
+    \item 3W Dataset 2.0.0 overview: 57 real Event-9, 150 simulated, 594 normal
+    \item Median 32,135 timesteps per instance (floor justification, §2.2)
+    \item Monotonicity: \texttt{is\_monotonic\_severity()} = 57/57 True
+          (free methodological point)
+    \item Missingness: NaN labels in 57/57 instances (median 11.2\%, max 50.4\%)
+    \item Frozen sensors: 3 instances with dead P-TPT/T-TPT
+    \item Channel selection trade-off table (5-channel set chosen)
+    \item Well disjointness: hydrate wells $\cap$ normal wells $= \emptyset$
+    \item Per-well normalization is mandatory (not cosmetic)
+    \item Decimation: 1 Hz $\to$ 1/30 Hz, window = 60 samples = 30 min
+\end{itemize}
+
+
+% ====================================================================
+% III. RELATED WORK — M4 writes
+% ====================================================================
+\section{Related Work}
+\label{sec:related_work}
+
+% TODO (M4): Write Related Work. Should cover:
+% - TCN for industrial time-series classification (Bai et al., 2018)
+% - GRU for sequence modeling (Cho et al., 2014)
+% - Early warning systems in process industries
+% - 3W dataset prior work (Vargas et al.)
+
+\placeholder{M4 writes Related Work: TCN/GRU in industrial time-series,
+prior 3W work, early warning in process control. 1--1.5 columns.}
+
+
+% ====================================================================
+% IV. METHOD — M3 (baseline), M4 (architectures), M5 (evaluation)
+% ====================================================================
+\section{Method}
+\label{sec:method}
+
+% ---- IV-A. Feature Engineering (M3) ----
+\subsection{Baseline Feature Engineering}
+\label{sec:method_features}
+
+% TODO (M3): Describe the multi-timescale rolling feature extractor.
+% Scales [1.0, 0.5, 0.25], 6 statistics (mean, std, min, max, slope,
+% last_diff), mask-aware (only present values), presence fraction feature.
+
+\placeholder{M3 writes feature engineering: 3 scales $\times$ 6 statistics,
+mask-aware computation, per-channel presence fraction as feature.}
+
+% ---- IV-B. Architectures (M4) ----
+\subsection{Model Architectures}
+\label{sec:method_arch}
+
+% TODO (M4): Describe TCN and GRU architectures.
+% TCN: 4 temporal blocks, kernel_size=3, dilations [1,2,4,8],
+%   receptive field = 61, channels-first input, mask concatenated
+% GRU: unidirectional (causality), hidden_size=64, num_layers=1
+%   mask concatenated on channel axis
+% Both take (x, mask) explicitly per Addendum A.3
+
+\placeholder{M4 writes architecture descriptions: TCN (receptive field 61,
+4 blocks, dilation schedule, parameter count), GRU (unidirectional only,
+hidden size, parameter count). Include receptive field vs window size
+assertion.}
+
+% ---- IV-C. Evaluation Protocol (M5) ----
+\subsection{Evaluation Protocol}
+\label{sec:method_eval}
+
+We evaluate all models using three complementary metrics at a matched
+operating point:
+
+\textbf{Lead Time.} For each hydrate event instance, lead time is defined as
+the difference between the annotated transient onset time and the first alarm
+onset that occurs before it:
+\begin{equation}
+    \text{lead\_time} = t_{\text{transient\_onset}} - t_{\text{first\_alarm}}
+\end{equation}
+Following the data analysis in Section~\ref{sec:dataset}, we use the
+\emph{transient} onset (label code 109 in the 3W convention) rather than the
+blockage onset, because only 3 of 57 real instances reach blockage. The
+transient onset is available for all 14 positive-event instances across 7
+wells.
+
+\textbf{Event Recall.} The fraction of real hydrate events for which at least
+one alarm onset occurs before the transient onset. A missed event (no alarm
+before failure) contributes 0; a detected event contributes 1 regardless of
+how many alarms fired.
+
+\textbf{False Alarm Rate (FAR).} The number of alarm \emph{onsets} on
+Normal-operation instances, divided by the total Normal operating hours in that
+fold's test set:
+\begin{equation}
+    \text{FAR} = \frac{N_{\text{false\_alarm\_onsets}}}{\text{total\_normal\_hours}}
+\end{equation}
+Critically, we count alarm onsets, not individual windows above threshold —
+one sustained false alarm counts as one event, not thousands
+(Section~\ref{sec:method_eval}, pitfall W4.1).
+
+\textbf{Operating Point.} All models are compared at a matched target FAR of
+$1/100$ per operating hour. The threshold achieving this FAR is selected on
+the \emph{validation} fold only (per-fold, per-model), then applied unchanged
+to the test fold. This ``freeze'' protocol (S3 in our timeline) ensures that
+test-set numbers are never used to tune any hyperparameter.
+
+\textbf{Alarm Definition.} A positive-class probability $p(t)$ is first
+smoothed with a causal (trailing) rolling mean of configurable window size.
+An alarm fires when the smoothed probability stays above the selected
+threshold for at least \texttt{min\_duration} continuous seconds. The causal
+smoothing constraint is critical: a centered moving average would leak future
+information into the current alarm decision, inflating lead time measurements
+(see \texttt{tests/test\_alarm.py} for the regression test guarding this).
+
+\textbf{Supplementary Metrics.} PR-AUC (area under the precision--recall
+curve for the collapsed binary positive score), per-class PR-AUC
+(Normal/Transient/Established one-vs-rest), and Expected Calibration Error
+(ECE) are reported for completeness.
+
+
+% ====================================================================
+% V. EXPERIMENTAL SETUP — M2 writes
+% ====================================================================
+\section{Experimental Setup}
+\label{sec:experimental_setup}
+
+% TODO (M2): Write Experimental Setup. Must include:
+% - Grouped CV design: two independent splits (positives + normals)
+% - Why StratifiedGroupKFold alone won't work (disjoint well populations)
+% - Number of folds and justification (7 positive wells → 3-fold or LOWO)
+% - fold_report() as Table 1 — include test_normal_hours column
+% - Simulation instances: training only, never in val/test
+
+\placeholder{M2 writes Experimental Setup: grouped CV with independent splits
+for positive and normal wells, fold report (Table~1), simulation data policy.}
+
+% Fold report table — auto-generated by run_all.sh, \input'd here
+% \input{tables/fold_report.tex}
+
+
+% ====================================================================
+% VI. RESULTS — M3 (XGBoost), M4 (deep models), M5 (head-to-head)
+% ====================================================================
+\section{Results}
+\label{sec:results}
+
+% ---- VI-A. XGBoost Baseline Results (M3) ----
+\subsection{XGBoost Baseline}
+\label{sec:results_xgb}
+
+% TODO (M3): Write XGBoost results.
+% - Table: PR-AUC, event recall, FAR, lead time for real_only and real_plus_sim
+% - Feature importance discussion: compare top features with physical hydrate signature
+% - This is the Discussion section's strongest paragraph
+
+\placeholder{M3 writes XGBoost results: performance under real\_only and
+real\_plus\_sim conditions, feature importance analysis linked to physical
+hydrate indicators in the 3W descriptor.}
+
+% Auto-generated table
+% \input{tables/pr_auc.tex}
+
+% ---- VI-B. Deep Model Results (M4) ----
+\subsection{Deep Models: TCN and GRU}
+\label{sec:results_dl}
+
+% TODO (M4): Write TCN and GRU results.
+% - Same metrics as XGBoost, same two conditions
+% - GRU bidirectional=False — note in text
+% - Compare parameter counts, training time, VRAM peak
+
+\placeholder{M4 writes deep model results: TCN and GRU performance under both
+conditions, with parameter count and training efficiency comparison.}
+
+% ---- VI-C. Head-to-Head Comparison (M5) ----
+\subsection{Model Comparison}
+\label{sec:results_comparison}
+
+% Auto-generated comparison tables from run_all.sh
+% \input{tables/event_recall.tex}
+% \input{tables/lead_time.tex}
+% \input{tables/far.tex}
+
+\placeholder{M5 fills after S3 FREEZE: head-to-head table comparing all three
+models $\times$ two conditions. All numbers from results/results.csv via
+aggregate.py — no hand-typed values.}
+
+% Lead time vs FAR figure (M5-owned)
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\columnwidth]{lead_time_vs_far.png}
+%     \caption{Lead time vs.\ false alarm rate trade-off for all three models.
+%     Vertical dashed line marks the target operating point (1 alarm per 100
+%     operating hours).}
+%     \label{fig:lead_time_vs_far}
+% \end{figure}
+
+% Per-well lead time box plot (M5-owned)
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\columnwidth]{per_well_lead_time.png}
+%     \caption{Distribution of lead times across wells for each model.}
+%     \label{fig:per_well_box}
+% \end{figure}
+
+
+% ====================================================================
+% VII. DISCUSSION & LIMITATIONS — M2 writes
+% ====================================================================
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+% TODO (M2): Write Discussion & Limitations. Must cover:
+% - Only 14 positive events from 7 wells — statistical significance concern
+% - 3 blockage instances — headline uses transient onset (Variant A)
+% - Normal wells and hydrate wells are disjoint — generalization concern
+% - Fold count given n=7 positive wells
+% - Simulated data systematically over-represents blockage phase
+% - SSL pretraining: "not attempted within the project timeframe"
+
+\placeholder{M2 writes Discussion \& Limitations: 14 positive events / 7
+wells / 3 blockage only; disjoint well populations; fold count vs statistical
+power; sim data bias; SSL pretraining deferred.}
+
+
+% ====================================================================
+% VIII. CONCLUSION — M5 writes
+% ====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+\placeholder{M5 fills after S3 FREEZE: 3--4 sentences summarizing:
+(1) which model + condition produced the best lead time at the matched FAR,
+(2) the role of simulated data (helpful or not),
+(3) the main limitation (small n, disjoint wells),
+(4) future work (SSL pretraining, more events, multi-well generalization).}
+
+
+% ====================================================================
+% TOOLS & ACKNOWLEDGEMENTS — M5 writes
+% ====================================================================
+\section*{Tools and Acknowledgements}
+\label{sec:tools}
+
+% This section satisfies the brief's academic integrity requirement.
+% AI assistance must be disclosed here (not via commit trailers — see
+% TEAM_5_MEMBERS.md §0, Git rules).
+
+This project used the following tools and libraries: Python~3.x,
+PyTorch~2.3.1, XGBoost~2.0.3, scikit-learn~1.5.0, NumPy, Pandas,
+Matplotlib, and the 3W Dataset~2.0.0 toolkit by Petrobras.
+
+\placeholder{M5: disclose any AI assistance used during development, per the
+brief's academic integrity requirement. Example: ``Parts of the code and
+documentation were developed with assistance from [tool name]. All AI-generated
+content was reviewed, tested, and validated by team members.''}
+
+
+% ====================================================================
+% REFERENCES
+% ====================================================================
+\begin{thebibliography}{9}
+
+\bibitem{3w}
+R.~E.~V.~Vargas, C.~J.~Munaro, P.~M.~Ciarelli, A.~G.~Medeiros,
+B.~G.~do Nascimento, B.~C.~C.~Gonçalves, J.~C.~Madalena, A.~Avellar,
+``A realistic and public dataset with rare undesirable real events in oil
+wells,'' \emph{Journal of Petroleum Science and Engineering}, vol.~181,
+2019.
+
+\bibitem{tcn}
+S.~Bai, J.~Z.~Kolter, and V.~Koltun, ``An empirical evaluation of generic
+convolutional and recurrent networks for sequence modeling,''
+\emph{arXiv:1803.01271}, 2018.
+
+\bibitem{gru}
+K.~Cho, B.~van~Merriënboer, C.~Gulcehre, D.~Bahdanau, F.~Bougares,
+H.~Schwenk, and Y.~Bengio, ``Learning phrase representations using RNN
+encoder-decoder for statistical machine translation,'' in \emph{Proc.
+EMNLP}, 2014.
+
+\bibitem{focal}
+T.~Y.~Lin, P.~Goyal, R.~Girshick, K.~He, and P.~Dollár, ``Focal loss
+for dense object detection,'' in \emph{Proc. ICCV}, 2017.
+
+% TODO: M4 adds related work references here
+% TODO: M3 adds feature engineering / industrial process monitoring references
+
+\end{thebibliography}
+
+\end{document}
