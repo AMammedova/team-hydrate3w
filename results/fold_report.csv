@@ -1,0 +1,4 @@
+repeat,fold,n_train_wells,n_val_wells,n_test_wells,n_train_windows,n_val_windows,n_test_windows,n_val_positive_events,n_test_positive_events,val_normal_hours,test_normal_hours,test_wells
+0,0,156,6,6,63236,11260,11592,1,5,530.7,509.2,"WELL-00001,WELL-00004,WELL-00007,WELL-00015,WELL-00039,WELL-00042"
+0,1,154,9,5,60495,7327,18266,3,5,305.2,561.8,"WELL-00006,WELL-00020,WELL-00037,WELL-00040,WELL-00041"
+0,2,155,6,7,62095,11592,12401,5,4,509.2,530.7,"WELL-00003,WELL-00005,WELL-00010,WELL-00014,WELL-00016,WELL-00019,WELL-00038"
