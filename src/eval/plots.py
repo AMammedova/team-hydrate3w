@@ -12,10 +12,16 @@ beat ten decorative ones (§9 of the DL brief). Resist adding a fifth.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from src.contract import EVENT_CODE
+from src.data.stats import _shade_state_zones
 
 
 # ---------------------------------------------------------------------------
@@ -30,24 +36,32 @@ def plot_annotated_trace(
     alarm onset marked as a vertical line. Built on top of Member 1's
     plotting helpers in src/data/stats.py.
 
-    M1 implements this — it shares code with stats.annotated_trace_figure().
-    After M1 completes stats.py, this function wraps it with alarm overlays.
-
-    Parameters
-    ----------
-    instance_df : pd.DataFrame
-        Full-length raw sensor data for one instance (columns = channels + 'class').
-    alarms : dict
-        {model_name: [onset_timestamp, ...]} — alarm onsets per model.
-    out_path : str
-        Where to save the figure (.png).
+    `alarms`: model_name -> alarm time, in seconds from `instance_df`'s first
+    sample (the same convention as WindowBuilder.build_windows()'s
+    window_end_time / alarm.py's alarm times). Empty dict draws the zones
+    with no alarm lines.
     """
-    # TODO (M1): implement using stats.annotated_trace_figure() as the base
-    # layer, then overlay alarm vertical lines from `alarms` dict.
-    # Colors per model: use a consistent palette matching the other figures.
-    raise NotImplementedError(
-        "M1 implements plot_annotated_trace — see src/data/stats.py"
-    )
+    columns = [c for c in instance_df.columns if c not in ("class", "state")]
+    fig, ax = plt.subplots(figsize=(10, 4))
+    _shade_state_zones(ax, instance_df, EVENT_CODE)
+    for col in columns:
+        ax.plot(instance_df.index, instance_df[col], linewidth=0.8, label=col)
+
+    t0 = instance_df.index[0]
+    colors = plt.get_cmap("tab10").colors
+    for i, (model, alarm_seconds) in enumerate(alarms.items()):
+        ax.axvline(
+            t0 + pd.Timedelta(seconds=alarm_seconds),
+            color=colors[i % len(colors)], linestyle="--", linewidth=1.5,
+            label=f"{model} alarm",
+        )
+
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Sensor value")
+    ax.legend(loc="upper left", fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +91,7 @@ def plot_lead_time_vs_false_alarm_rate(
     figsize : tuple
         Figure dimensions.
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.ticker as ticker
+    import matplotlib.ticker as ticker  # noqa: F401 — available for callers
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -152,8 +165,6 @@ def plot_per_well_lead_time_box(
     figsize : tuple
         Figure dimensions.
     """
-    import matplotlib.pyplot as plt
-
     if "well_id" not in fold_metrics.columns or "lead_time" not in fold_metrics.columns:
         # Nothing to plot — create an empty figure with an explanation
         fig, ax = plt.subplots(figsize=figsize)

@@ -1,17 +1,13 @@
 """
-Module 5 — TCN. See project statement section 8 (DL5.1-DL5.4) and
-Addendum A.2/A.3 for the reconciled channels-first + explicit-mask contract.
+Temporal Convolutional Network (TCN)
 
-Reminder from the project statement: with the defaults below, the
-receptive field is only ~1 timestep larger than the default window_size.
-Always assert tcn.receptive_field() >= window_size in the training
-script after any change to either -- see DL5.1's callout box.
+Implements a causal TCN classifier with explicit mask handling.
 
-Input convention (team contract): x and mask both arrive as
-[batch, n_channels, window_size] (channels-first, no transpose needed --
-this is Conv1d's native layout). mask is concatenated onto x along the
-channel dimension before the first conv, so a model built with
-n_channels=20 raw variables actually consumes 40 input channels.
+Note:
+- With defaults, receptive field ≈ window_size + 1.
+- Always assert tcn.receptive_field() >= window_size in training scripts.
+- Input convention: x and mask arrive as (batch, n_channels, window_size).
+  Mask is concatenated with x along the channel dimension.
 """
 
 from __future__ import annotations
@@ -78,11 +74,10 @@ class TCN(nn.Module):
 
     def receptive_field(self) -> int:
         """
-        Each TemporalBlock stacks TWO causal convs at the same dilation,
+        Each TemporalBlock stacks two causal convs at the same dilation,
         so each block contributes 2 * (kernel_size - 1) * dilation to the
         receptive field, not just one. With the class defaults
         (channel_sizes length 4 -> dilations [1,2,4,8], kernel_size=3)
-        this works out to 61 -- see the project statement's callout
-        about this margin being only ~1 timestep over window_size=60.
+        this works out to 61 -- this margin being only ~1 timestep over window_size=60.
         """
         return 1 + sum(2 * (self.kernel_size - 1) * d for d in self.dilations)

@@ -1,0 +1,16 @@
+# Default: auto-detect text vs binary, normalize line endings
+* text=auto
+
+# Enforce LF for source code
+*.py text eol=lf
+*.ipynb text eol=lf
+*.sh text eol=lf
+
+# Windows batch files keep CRLF
+*.bat text eol=crlf
+
+# Never touch binaries
+*.png binary
+*.pdf binary
+*.npz binary
+*.pt binary
