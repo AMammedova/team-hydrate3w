@@ -1,6 +1,6 @@
 """
-Module 6 — GRU. See project statement section 9 (DL6.1-DL6.3) and
-Addendum A.2/A.3 for the reconciled channels-first + explicit-mask contract.
+GRU Classifier
+Implements a causal GRU-based sequence classifier.
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ class GRUClassifier(nn.Module):
         hidden_size: int = 64,
         num_layers: int = 1,
         num_classes: int = 3,
-        bidirectional: bool = False,   # keep False -- causality, see DL6.1
+        bidirectional: bool = False,   # keep False -- causality
         dropout: float = 0.2,
     ) -> None:
         super().__init__()
         if bidirectional:
             raise ValueError(
                 "bidirectional=True looks into the future within the window, "
-                "which is invalid for a causal early-warning model (DL6.1). "
+                "which is invalid for a causal early-warning model. "
                 "Pass a documented override only if you have a specific, "
                 "reported reason to break causality."
             )
