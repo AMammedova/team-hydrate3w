@@ -12,6 +12,7 @@ curve (select_threshold_curve) so other budgets stay visible.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from src.eval.alarm import alarm_times
 
@@ -31,9 +32,27 @@ def select_threshold(
     closest to target_far without exceeding it (prefer under-alarming
     over over-alarming when no exact match exists).
     """
-    # TODO: sweep e.g. np.linspace(0, 1, 200), reuse alarm_times() per
-    # candidate threshold, select per the rule above.
-    raise NotImplementedError
+    thresholds = np.linspace(0, 1, 200)
+    best_threshold = 1.0
+    closest_far = -1.0
+
+    for thresh in thresholds:
+        total_alarms = 0
+        for inst_id in y_val_proba:
+            alarms = alarm_times(
+                proba=y_val_proba[inst_id], t=y_val_time[inst_id],
+                smooth_window=smooth_window, threshold=thresh,
+                min_duration=min_duration,
+            )
+            total_alarms += len(alarms)
+        
+        far = total_alarms / val_normal_hours
+        
+        if far <= target_far and far > closest_far:
+            closest_far = far
+            best_threshold = thresh
+            
+    return float(best_threshold)
 
 
 def select_threshold_curve(
@@ -45,5 +64,21 @@ def select_threshold_curve(
     figure") -- one row per swept threshold, with its resulting
     false-alarm rate. plots.py consumes this directly.
     """
-    # TODO
-    raise NotImplementedError
+    import pandas as pd
+    thresholds = np.linspace(0, 1, 200)
+    records = []
+    
+    for thresh in thresholds:
+        total_alarms = 0
+        for inst_id in y_val_proba:
+            alarms = alarm_times(
+                proba=y_val_proba[inst_id], t=y_val_time[inst_id],
+                smooth_window=smooth_window, threshold=thresh,
+                min_duration=min_duration,
+            )
+            total_alarms += len(alarms)
+            
+        far = total_alarms / val_normal_hours
+        records.append({"threshold": thresh, "false_alarm_rate": far})
+        
+    return pd.DataFrame(records)

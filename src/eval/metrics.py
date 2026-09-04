@@ -65,7 +65,20 @@ def false_alarms_per_operating_hour(n_false_alarm_onsets: int, total_normal_hour
 
 def expected_calibration_error(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
     """Standard binned ECE: |accuracy - confidence| per bin, weighted by bin size."""
-    # TODO (Member 2 owns calibration itself in src/baselines/calibrate.py;
-    # this is the shared metric implementation both the baseline and deep
-    # models' reliability diagrams call into).
-    raise NotImplementedError
+    bins = np.linspace(0., 1., n_bins + 1)
+    binids = np.digitize(y_prob, bins) - 1
+    binids = np.clip(binids, 0, n_bins - 1)
+    
+    ece = 0.0
+    for i in range(n_bins):
+        bin_mask = (binids == i)
+        if not np.any(bin_mask):
+            continue
+        
+        bin_acc = np.mean(y_true[bin_mask])
+        bin_conf = np.mean(y_prob[bin_mask])
+        bin_weight = np.sum(bin_mask) / len(y_prob)
+        
+        ece += bin_weight * np.abs(bin_acc - bin_conf)
+        
+    return float(ece)
