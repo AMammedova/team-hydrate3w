@@ -1,4 +1,4 @@
-"""Member 4 -- GPU profiling utilities for TCN and GRU.
+"""GPU profiling utilities for TCN and GRU.
 
 Reports:
 - trainable parameter count;

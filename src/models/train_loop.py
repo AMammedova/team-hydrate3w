@@ -1,5 +1,5 @@
 """
-Member 4 -- GPU-ready training loop for TCN/GRU.
+GPU-ready training loop for TCN/GRU.
 
 Key guarantees:
 - models receive ``model(x, mask)``;

@@ -1,16 +1,16 @@
-"""Member 4 -- final TCN/GRU training runner (GPU target).
+"""Final TCN/GRU training runner (GPU target).
 
 Runs the guaranteed Result-1 deep-model matrix:
     TCN x {real_only, real_plus_sim}
     GRU x {real_only, real_plus_sim}
 
 Important design choices:
-- real train/validation/test wells are generated ONCE with Member 2's
+- real train/validation/test wells are generated ONCE with
   GroupedKFoldSplitter; the real_plus_sim condition adds simulated rows only
   to the same real training fold, so condition comparisons are paired;
 - validation/test never contain simulated instances;
 - early stopping is validation PR-AUC through Trainer;
-- validation AND test probabilities are saved for Member 5, because threshold
+- validation AND test probabilities are saved, because threshold
   selection belongs on validation and final event metrics belong on test;
 - CUDA is the default and expected final environment.
 """

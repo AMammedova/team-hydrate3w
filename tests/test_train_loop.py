@@ -1,4 +1,4 @@
-"""Unit tests for Member 4's GPU-ready Trainer.
+"""Unit tests for GPU-ready Trainer.
 
 Tests run on CPU intentionally because they validate control flow, checkpointing,
 metrics and dataset semantics; CUDA/AMP is exercised by the real GPU smoke run.

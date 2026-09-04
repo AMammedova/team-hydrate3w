@@ -1,5 +1,5 @@
 """
-Member 4 -- PyTorch adapter for cached hydrate windows.
+PyTorch adapter for cached hydrate windows.
 
 The authoritative real-cache row order is owned by src.data.splits.load_cache().
 Use WindowDataset.from_cache() in experiment code so GroupedKFoldSplitter indices

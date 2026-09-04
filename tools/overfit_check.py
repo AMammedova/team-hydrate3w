@@ -1,5 +1,4 @@
-"""Member 4 -- tiny-subset overfit sanity check.
-
+"""Tiny-subset overfit sanity check.
 Run this before any expensive GPU sweep. If TCN/GRU cannot memorize ~20
 windows with dropout disabled, stop and fix the model/data pipeline first.
 
