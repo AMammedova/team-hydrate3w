@@ -256,10 +256,42 @@ def plot_reliability_diagram(
     n_bins : int
         Number of calibration bins.
     """
-    # TODO (M3): implement reliability diagram with diagonal reference line,
-    # showing before-calibration and after-calibration curves.
-    # Use metrics.expected_calibration_error() to annotate the ECE value
-    # on each curve.
-    raise NotImplementedError(
-        "M3 implements plot_reliability_diagram — see src/baselines/calibrate.py"
+    from sklearn.calibration import calibration_curve
+    from src.eval.metrics import expected_calibration_error
+    import matplotlib.pyplot as plt
+
+    # Calculate ECE for both
+    ece_before = expected_calibration_error(y_true, y_prob_before, n_bins)
+    ece_after = expected_calibration_error(y_true, y_prob_after, n_bins)
+
+    # Compute calibration curves
+    prob_true_before, prob_pred_before = calibration_curve(y_true, y_prob_before, n_bins=n_bins, strategy='uniform')
+    prob_true_after, prob_pred_after = calibration_curve(y_true, y_prob_after, n_bins=n_bins, strategy='uniform')
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    # Perfectly calibrated diagonal line
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Perfectly Calibrated")
+
+    # Before calibration curve
+    ax.plot(
+        prob_pred_before, prob_true_before, 
+        marker="s", color="#FF5722", label=f"Before Calibration (ECE = {ece_before:.3f})", linewidth=1.5
     )
+
+    # After calibration curve
+    ax.plot(
+        prob_pred_after, prob_true_after, 
+        marker="o", color="#4CAF50", label=f"After Calibration (ECE = {ece_after:.3f})", linewidth=2.0
+    )
+
+    ax.set_xlabel("Mean Predicted Probability", fontsize=11)
+    ax.set_ylabel("Fraction of Positives", fontsize=11)
+    ax.set_title("Reliability Diagram (Calibration Curve)", fontsize=12, fontweight="bold")
+    ax.legend(loc="upper left", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)

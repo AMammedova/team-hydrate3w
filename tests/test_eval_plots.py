@@ -42,3 +42,40 @@ def test_plot_annotated_trace_with_no_alarms(tmp_path: Path):
     out = tmp_path / "trace_no_alarms.png"
     plot_annotated_trace(df, {}, str(out))
     assert out.exists()
+
+
+def test_plot_lead_time_vs_false_alarm_rate(tmp_path: Path):
+    from src.eval.plots import plot_lead_time_vs_false_alarm_rate
+    curves = {
+        "xgb": pd.DataFrame({"threshold": [0.1, 0.5], "false_alarm_rate": [0.05, 0.01], "lead_time": [1000, 500]}),
+        "tcn": pd.DataFrame({"threshold": [0.2, 0.6], "false_alarm_rate": [0.08, 0.02], "lead_time": [1200, 600]})
+    }
+    out = tmp_path / "lead_time_far.png"
+    plot_lead_time_vs_false_alarm_rate(curves, str(out))
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_plot_per_well_lead_time_box(tmp_path: Path):
+    from src.eval.plots import plot_per_well_lead_time_box
+    metrics = pd.DataFrame({
+        "well_id": ["WELL-1", "WELL-1", "WELL-2", "WELL-2"],
+        "lead_time": [600, 1200, 300, np.nan],
+        "model": ["xgb", "tcn", "xgb", "tcn"]
+    })
+    out = tmp_path / "per_well_box.png"
+    plot_per_well_lead_time_box(metrics, str(out))
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_plot_reliability_diagram(tmp_path: Path):
+    from src.eval.plots import plot_reliability_diagram
+    y_true = np.array([0, 1, 0, 1, 1])
+    y_prob_before = np.array([0.1, 0.9, 0.2, 0.8, 0.7])
+    y_prob_after = np.array([0.05, 0.95, 0.1, 0.9, 0.85])
+    
+    out = tmp_path / "reliability.png"
+    plot_reliability_diagram(y_true, y_prob_before, y_prob_after, str(out))
+    assert out.exists()
+    assert out.stat().st_size > 0
