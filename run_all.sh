@@ -104,22 +104,39 @@ echo ""
 echo "==========================================="
 echo " 4. Running Baseline Models — XGBoost (M3)"
 echo "==========================================="
-# TODO (M3): uncomment when features.py transform() and tune.py are implemented
-# Condition 1: real_only
-# python -c "
-# from src.baselines.xgb_model import XGBoostBaseline, compute_sample_weight
-# from src.baselines.tune import search
-# from src.baselines.calibrate import fit_calibrator
-# # ... load cache, run CV, write to results/results.csv
-# "
-# Condition 2: real_plus_sim
-# python -c "
-# # ... same but include simulated instances in training
-# "
-echo "[WAITING FOR M3] features.py transform(), tune.py, calibrate.py not yet implemented."
-echo "  → M3 needs to implement RollingFeatureExtractor.transform()"
-echo "  → M3 needs to implement tune.search() for hyperparameter search"
-echo "  → M3 needs to implement fit_calibrator() for calibration"
+# M3 owns this step. tools/train_xgb.py runs the full Result-1 baseline matrix
+# (XGBoost x {real_only, real_plus_sim}) and writes, for every fold:
+#   results/results.csv                  validation metrics, contract schema
+#   results/model_outputs/*_val.npz      probabilities Module 8 selects on
+#   results/model_outputs/*_test.npz     probabilities Module 8 scores ONCE
+#   results/tables/*_importance_*.csv    gain + permutation importance
+#   figures/reliability_xgboost.png      before/after calibration
+#
+# --device auto uses the GPU when XGBoost can genuinely see one and falls back
+# to CPU otherwise; it never claims a GPU it did not get.
+#
+# Test METRICS stay off until the S3 freeze. Test probabilities are written
+# every run, because Module 8 needs them; writing predictions is not the same
+# as reading the score. After the freeze, re-run this step with --eval-test.
+XGB_EVAL_TEST="${XGB_EVAL_TEST:-}"
+
+if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
+  python -m tools.train_xgb \
+      --cache "$CACHE_DIR" \
+      --out-results "$RESULTS_DIR/results.csv" \
+      --outputs-dir "$RESULTS_DIR/model_outputs" \
+      --tables-dir "$RESULTS_DIR/tables" \
+      --figures-dir "$FIGURES_DIR" \
+      --conditions real_only,real_plus_sim \
+      --seeds 42 \
+      --n-splits 3 \
+      --device auto \
+      --calibration platt \
+      --append \
+      ${XGB_EVAL_TEST}
+else
+  echo "[M3] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
+fi
 
 # ------------------------------------------------------------------
 # Step 5: Deep Models — TCN & GRU (M4)
@@ -203,8 +220,8 @@ figures_dir = '$FIGURES_DIR'
 # M1-owned figure (waiting for M1):
 # - plot_annotated_trace → figures/annotated_trace.png
 
-# M3-owned figure (waiting for M3):
-# - plot_reliability_diagram → figures/reliability_diagram.png
+# M3-owned figure (DONE, written by step 4):
+# - plot_reliability_diagram -> figures/reliability_xgboost.png
 
 results_path = '$RESULTS_DIR/results.csv'
 if os.path.exists(results_path):
@@ -230,6 +247,6 @@ echo "   $FIGURES_DIR/*.png           — all paper figures"
 echo ""
 echo " Pending module implementations:"
 echo "   M2: splits.py (critical path — M3/M4/M5 need folds)"
-echo "   M3: features.py, tune.py, calibrate.py, importance.py"
+echo "   M3: DONE — features, tuning, calibration, importance, reliability figure"
 echo "   M4: train_loop.py (fit, predict_proba, load_best_checkpoint)"
 echo "==========================================="

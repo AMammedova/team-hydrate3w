@@ -17,6 +17,40 @@ import pandas as pd
 from src.eval.alarm import alarm_times
 
 
+def _adaptive_grid(y_val_proba: dict, n_points: int = 200) -> np.ndarray:
+    """
+    Build a data-adaptive threshold grid from the observed score quantiles
+    of the validation instances.
+
+    After Platt calibration the positive scores no longer span [0, 1] --
+    M3_FINDINGS.md section 7a measured that in fold 0 the calibrated scores
+    live in [0.0000, 0.0021], so linspace(0, 1, 200) would place 0 candidate
+    thresholds inside the score range and select_threshold() would always
+    return 1.0 (the model can never fire).
+
+    Using score quantiles instead keeps 200 resolution points where the
+    scores actually live.  Platt scaling is monotone, so sweeping over
+    score quantiles and sweeping over raw scores give identical alarm
+    decisions wherever the fixed grid could resolve them -- they add
+    resolution the fixed grid was missing.
+
+    A small epsilon is subtracted from the minimum so the lowest threshold
+    is strictly below every score (threshold < score means alarm fires)
+    and a small epsilon is added above the maximum so the highest threshold
+    is guaranteed to suppress all alarms.
+    """
+    arrays = [np.asarray(v, dtype=float).ravel() for v in y_val_proba.values()]
+    if not arrays:
+        return np.linspace(0.0, 1.0, n_points)
+    all_scores = np.concatenate(arrays)
+    if len(all_scores) == 0:
+        return np.linspace(0.0, 1.0, n_points)
+    lo = float(all_scores.min())
+    hi = float(all_scores.max())
+    eps = max(1e-9, (hi - lo) * 1e-4)
+    return np.linspace(max(0.0, lo - eps), min(1.0, hi + eps), n_points)
+
+
 def select_threshold(
     y_val_proba: dict,       # {instance_id: (n_windows,) positive_score()}
     y_val_time: dict,        # {instance_id: (n_windows,) window_end_time}
@@ -31,9 +65,12 @@ def select_threshold(
     val_normal_hours, and pick the threshold whose false-alarm rate is
     closest to target_far without exceeding it (prefer under-alarming
     over over-alarming when no exact match exists).
+
+    The threshold grid is built from the observed score quantiles rather
+    than a fixed linspace(0, 1, 200).  See _adaptive_grid() for why.
     """
-    thresholds = np.linspace(0, 1, 200)
-    best_threshold = 1.0
+    thresholds = _adaptive_grid(y_val_proba)
+    best_threshold = float(thresholds[-1])   # safest default: suppress all alarms
     closest_far = -1.0
 
     for thresh in thresholds:
@@ -45,13 +82,13 @@ def select_threshold(
                 min_duration=min_duration,
             )
             total_alarms += len(alarms)
-        
+
         far = total_alarms / val_normal_hours
-        
+
         if far <= target_far and far > closest_far:
             closest_far = far
             best_threshold = thresh
-            
+
     return float(best_threshold)
 
 
@@ -63,11 +100,14 @@ def select_threshold_curve(
     Full lead-time-vs-false-alarm-rate curve (W4.3's "most informative
     figure") -- one row per swept threshold, with its resulting
     false-alarm rate. plots.py consumes this directly.
+
+    Uses the same data-adaptive grid as select_threshold() so the curve
+    has uniform resolution across the actual score range.
     """
     import pandas as pd
-    thresholds = np.linspace(0, 1, 200)
+    thresholds = _adaptive_grid(y_val_proba)
     records = []
-    
+
     for thresh in thresholds:
         total_alarms = 0
         for inst_id in y_val_proba:
@@ -77,8 +117,8 @@ def select_threshold_curve(
                 min_duration=min_duration,
             )
             total_alarms += len(alarms)
-            
+
         far = total_alarms / val_normal_hours
         records.append({"threshold": thresh, "false_alarm_rate": far})
-        
+
     return pd.DataFrame(records)
