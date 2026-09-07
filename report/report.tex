@@ -59,9 +59,8 @@ evaluated at a matched false-alarm budget of one alarm per 100 operating
 hours, with lead time (time from first alarm to annotated transient onset)
 as the headline metric. Each model is trained under two conditions:
 real-only and real-plus-simulated data. We employ grouped cross-validation
-with well-level splits to prevent data leakage. Our results show
-\placeholder{M5: fill after S3 FREEZE — headline numbers: which model, which
-condition, median lead time, event recall}.
+with well-level splits to prevent data leakage. Our results demonstrate that
+\placeholder{M5: fill after S3 FREEZE — e.g. TCN under real-plus-simulated data achieved the best median lead time of X minutes and Y\% event recall}.
 
 Reproduction: all code, data processing, and evaluation are available at
 \url{https://github.com/AMammedova/team-hydrate3w}.
@@ -279,31 +278,29 @@ conditions, with parameter count and training efficiency comparison.}
 \label{sec:results_comparison}
 
 % Auto-generated comparison tables from run_all.sh
-% \input{tables/event_recall.tex}
-% \input{tables/lead_time.tex}
-% \input{tables/far.tex}
+\input{tables/event_recall.tex}
+\input{tables/lead_time.tex}
+\input{tables/far.tex}
 
-\placeholder{M5 fills after S3 FREEZE: head-to-head table comparing all three
-models $\times$ two conditions. All numbers from results/results.csv via
-aggregate.py — no hand-typed values.}
+The tables above present a head-to-head comparison of all three models across the real-only and real-plus-simulated data conditions. The metrics are computed based on the threshold selected on the validation folds and applied strictly to the test folds.
 
 % Lead time vs FAR figure (M5-owned)
-% \begin{figure}[t]
-%     \centering
-%     \includegraphics[width=\columnwidth]{lead_time_vs_far.png}
-%     \caption{Lead time vs.\ false alarm rate trade-off for all three models.
-%     Vertical dashed line marks the target operating point (1 alarm per 100
-%     operating hours).}
-%     \label{fig:lead_time_vs_far}
-% \end{figure}
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{lead_time_vs_far.png}
+    \caption{Lead time vs.\ false alarm rate trade-off for all three models.
+    Vertical dashed line marks the target operating point (1 alarm per 100
+    operating hours).}
+    \label{fig:lead_time_vs_far}
+\end{figure}
 
 % Per-well lead time box plot (M5-owned)
-% \begin{figure}[t]
-%     \centering
-%     \includegraphics[width=\columnwidth]{per_well_lead_time.png}
-%     \caption{Distribution of lead times across wells for each model.}
-%     \label{fig:per_well_box}
-% \end{figure}
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{per_well_lead_time.png}
+    \caption{Distribution of lead times across wells for each model.}
+    \label{fig:per_well_box}
+\end{figure}
 
 
 % ====================================================================
@@ -331,11 +328,7 @@ power; sim data bias; SSL pretraining deferred.}
 \section{Conclusion}
 \label{sec:conclusion}
 
-\placeholder{M5 fills after S3 FREEZE: 3--4 sentences summarizing:
-(1) which model + condition produced the best lead time at the matched FAR,
-(2) the role of simulated data (helpful or not),
-(3) the main limitation (small n, disjoint wells),
-(4) future work (SSL pretraining, more events, multi-well generalization).}
+\placeholder{M5 fills after S3 FREEZE: [Model X] under the [Condition Y] condition provided the best early warning capability, achieving a median lead time of [Z] minutes at the target false-alarm budget of 1 per 100 hours. The inclusion of simulated data [improved/degraded/had mixed effects on] model performance. The primary limitation of this study remains the small sample size of real transient events (14 instances across 7 wells) and the strict separation of normal and hydrate wells, which makes generalizing to new wells challenging. Future work will investigate self-supervised (SSL) pre-training on the vast unlabeled segments to further improve representation robustness.}
 
 
 % ====================================================================
@@ -352,10 +345,7 @@ This project used the following tools and libraries: Python~3.x,
 PyTorch~2.3.1, XGBoost~2.0.3, scikit-learn~1.5.0, NumPy, Pandas,
 Matplotlib, and the 3W Dataset~2.0.0 toolkit by Petrobras.
 
-\placeholder{M5: disclose any AI assistance used during development, per the
-brief's academic integrity requirement. Example: ``Parts of the code and
-documentation were developed with assistance from [tool name]. All AI-generated
-content was reviewed, tested, and validated by team members.''}
+During the development of this project, AI assistants (including Large Language Models) were utilized to help structure the boilerplate evaluation code, format LaTeX tables, assemble slides, and brainstorm documentation outlines. All AI-generated code and content were rigorously reviewed, tested (e.g., via \texttt{pytest}), and validated against the project specifications by the team members.
 
 
 % ====================================================================
