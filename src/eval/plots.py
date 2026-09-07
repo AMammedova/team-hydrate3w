@@ -236,62 +236,108 @@ def plot_reliability_diagram(
     y_prob_after: np.ndarray,
     out_path: str,
     n_bins: int = 10,
+    title: str = "Reliability diagram - XGBoost baseline",
 ) -> None:
-    """Before/after calibration reliability diagram.
-    Uses M3's src/baselines/calibrate.py output.
+    """Before/after calibration reliability diagram, with the bin counts that
+    make it readable. M3-owned; consumes src/baselines/calibrate.py's output.
 
-    M3 implements this — it needs the before/after probability arrays
-    from fit_calibrator().
+    WHY THE SECOND PANEL EXISTS
+    ---------------------------
+    The positive rate on this task is about 3%, so almost every window scores
+    low and the high-probability bins can hold a handful of rows out of tens
+    of thousands. A bare reliability curve draws those bins the same size as
+    a bin holding 30,000 rows, and a reader cannot tell a real miscalibration
+    from three unlucky windows. The lower panel is the per-bin count on a log
+    axis; marker area in the upper panel is scaled by the same count. Any
+    claim made from this figure has to survive looking at both.
 
     Parameters
     ----------
-    y_true : np.ndarray
-        Binary ground truth (1 = positive event).
-    y_prob_before : np.ndarray
-        Predicted probabilities before calibration.
-    y_prob_after : np.ndarray
-        Predicted probabilities after calibration (isotonic/Platt).
-    out_path : str
-        Where to save the figure (.png).
-    n_bins : int
-        Number of calibration bins.
+    y_true
+        Binary ground truth (1 = Transient or Established). Pass (y != 0).
+    y_prob_before, y_prob_after
+        positive_score() before and after the fitted Calibrator.
     """
-    from sklearn.calibration import calibration_curve
     from src.eval.metrics import expected_calibration_error
-    import matplotlib.pyplot as plt
 
-    # Calculate ECE for both
-    ece_before = expected_calibration_error(y_true, y_prob_before, n_bins)
-    ece_after = expected_calibration_error(y_true, y_prob_after, n_bins)
+    y_true = np.asarray(y_true).astype(int).ravel()
+    before = np.clip(np.asarray(y_prob_before, dtype=float).ravel(), 0.0, 1.0)
+    after = np.clip(np.asarray(y_prob_after, dtype=float).ravel(), 0.0, 1.0)
+    if not (len(y_true) == len(before) == len(after)):
+        raise ValueError(
+            f"length mismatch: y_true={len(y_true)}, before={len(before)}, after={len(after)}"
+        )
 
-    # Compute calibration curves
-    prob_true_before, prob_pred_before = calibration_curve(y_true, y_prob_before, n_bins=n_bins, strategy='uniform')
-    prob_true_after, prob_pred_after = calibration_curve(y_true, y_prob_after, n_bins=n_bins, strategy='uniform')
-
-    fig, ax = plt.subplots(figsize=(7, 7))
-
-    # Perfectly calibrated diagonal line
-    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Perfectly Calibrated")
-
-    # Before calibration curve
-    ax.plot(
-        prob_pred_before, prob_true_before, 
-        marker="s", color="#FF5722", label=f"Before Calibration (ECE = {ece_before:.3f})", linewidth=1.5
+    fig, (ax, ax_hist) = plt.subplots(
+        2, 1, figsize=(7, 8), sharex=True,
+        gridspec_kw={"height_ratios": [3, 1], "hspace": 0.08},
     )
 
-    # After calibration curve
-    ax.plot(
-        prob_pred_after, prob_true_after, 
-        marker="o", color="#4CAF50", label=f"After Calibration (ECE = {ece_after:.3f})", linewidth=2.0
-    )
+    single_class = len(np.unique(y_true)) < 2
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
 
-    ax.set_xlabel("Mean Predicted Probability", fontsize=11)
-    ax.set_ylabel("Fraction of Positives", fontsize=11)
-    ax.set_title("Reliability Diagram (Calibration Curve)", fontsize=12, fontweight="bold")
-    ax.legend(loc="upper left", fontsize=10)
+    def _curve(p):
+        """Per-bin (mean predicted, observed fraction, count). Computed here
+        rather than via sklearn's calibration_curve because that drops empty
+        bins silently, and which bins were empty is exactly what the reader
+        needs to know."""
+        idx = np.clip(np.digitize(p, edges) - 1, 0, n_bins - 1)
+        xs, ys, ns = [], [], []
+        for b in range(n_bins):
+            sel = idx == b
+            n = int(sel.sum())
+            ns.append(n)
+            if n:
+                xs.append(float(p[sel].mean()))
+                ys.append(float(y_true[sel].mean()))
+            else:
+                xs.append(np.nan)
+                ys.append(np.nan)
+        return np.array(xs), np.array(ys), np.array(ns)
+
+    ax.plot([0, 1], [0, 1], linestyle="--", color="gray", linewidth=1,
+            label="perfectly calibrated", zorder=1)
+
+    series = [
+        ("before calibration", before, "#FF5722", "s"),
+        ("after calibration", after, "#4CAF50", "o"),
+    ]
+    for label, p, color, marker in series:
+        xs, ys, ns = _curve(p)
+        ece = expected_calibration_error(y_true, p, n_bins)
+        brier = float(np.mean((p - y_true) ** 2))
+        ok = ~np.isnan(xs)
+        # Marker area tracks bin population, so a bin of 3 cannot masquerade
+        # as a bin of 30,000.
+        sizes = 20.0 + 180.0 * (ns[ok] / max(ns.max(), 1)) ** 0.5
+        ax.plot(xs[ok], ys[ok], color=color, linewidth=1.6, alpha=0.9, zorder=2,
+                label=f"{label} (ECE={ece:.3f}, Brier={brier:.3f})")
+        ax.scatter(xs[ok], ys[ok], s=sizes, color=color, marker=marker,
+                   edgecolor="white", linewidth=0.6, zorder=3)
+        ax_hist.step(edges[:-1], np.maximum(ns, 0.7), where="post",
+                     color=color, linewidth=1.4, label=label)
+
+    base_rate = float(y_true.mean())
+    ax.axhline(base_rate, color="#1565C0", linestyle=":", linewidth=1.2,
+               label=f"base rate = {base_rate:.3f}")
+
+    ax.set_ylabel("observed fraction of positives", fontsize=11)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(-0.02, 1.02)
     ax.grid(True, alpha=0.3)
-    
+    ax.legend(loc="upper left", fontsize=8.5, framealpha=0.9)
+    if single_class:
+        ax.text(0.5, 0.5, "validation fold is single-class: calibration undefined",
+                ha="center", va="center", fontsize=11, color="crimson",
+                transform=ax.transAxes)
+
+    ax_hist.set_yscale("log")
+    ax_hist.set_xlabel("predicted probability  P(Transient) + P(Established)", fontsize=11)
+    ax_hist.set_ylabel("windows/bin", fontsize=9)
+    ax_hist.grid(True, alpha=0.3)
+    ax_hist.tick_params(labelsize=8)
+
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)

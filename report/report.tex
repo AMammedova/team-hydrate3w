@@ -142,12 +142,91 @@ prior 3W work, early warning in process control. 1--1.5 columns.}
 \subsection{Baseline Feature Engineering}
 \label{sec:method_features}
 
-% TODO (M3): Describe the multi-timescale rolling feature extractor.
-% Scales [1.0, 0.5, 0.25], 6 statistics (mean, std, min, max, slope,
-% last_diff), mask-aware (only present values), presence fraction feature.
+% Written by M3. Source draft: report/method_baseline.md, which lists the
+% exact command behind every number here.
 
-\placeholder{M3 writes feature engineering: 3 scales $\times$ 6 statistics,
-mask-aware computation, per-channel presence fraction as feature.}
+The baseline is treated as a real competitor rather than a formality: it
+receives the same folds, the same class-imbalance treatment and the same
+calibration step as the deep models, and a recorded tuning budget. A
+baseline that was never tuned would make the deep-model comparison
+uninterpretable.
+
+\subsubsection{Input}
+The baseline consumes the same cache as the deep models: channels-first
+\texttt{float32} $[N, C, W]$ windows with an aligned \texttt{uint8} presence
+mask, where $\mathrm{mask}=1$ marks a genuinely observed sample. With the
+main-arm channel set, $C=5$ and $W=60$ decimated samples at one sample per
+30\,s, so each window spans \textbf{30 minutes} with a stride of 150\,s. On
+the built cache this gives \textbf{42{,}259 real windows} from 364 usable
+real instances, of which 1{,}295 are Transient and 118 Established --- a
+positive rate of \textbf{3.34\%}. All 14 transient events and all 3 blockage
+events survive the channel choice.
+
+\subsubsection{Multi-timescale, mask-aware features}
+For each window and channel we take three nested slices measured
+\emph{from the end} of the window (the full 60 samples, the last 30, and the
+last 15) and compute six statistics on each: mean, standard deviation,
+minimum, maximum, least-squares slope, and the net change between the first
+and last present sample. Taking slices from the end is what keeps the
+features causal: a spike early in the window can only affect the full-window
+statistics, which is verified by a unit test rather than assumed. Every
+statistic is computed over \textbf{present samples only}, and the
+per-channel presence fraction over the full window is appended as its own
+feature block, so the model is told how much of each channel it is trusting.
+With $C=5$ this yields $5 \times 6 \times 3 + 5 = 95$ features.
+
+The extractor has no fitted state: every column is a function of one window
+and its own mask, with no statistic pooled across rows. Extracting once for
+the whole cache is therefore bit-identical to extracting per fold, and the
+runner asserts the absence of a \texttt{fit()} at start-up so the property
+cannot silently lapse.
+
+\subsubsection{Encoding a dead sensor}
+Three real instances carry sensors frozen for their entire recording, and one
+of them is a blockage event, so this is not a corner case. When a channel
+observes nothing, its statistics are undefined. Emitting $0.0$ is actively
+wrong here: per-instance normalisation centres each recording near zero, so
+$0.0$ is precisely the value a \emph{healthy} sensor at its own baseline
+reports, and that encoding would state that a dead sensor looks normal. We
+emit \texttt{NaN} and let XGBoost learn a default branch direction at each
+split. The presence fraction remains a real measurement of exactly $0.0$ and
+is never \texttt{NaN}. Similarly, the slope is regressed on each sample's
+true position inside the slice rather than on its rank among present
+samples, so a gap keeps its width and the slope remains a rate; regressing
+on rank reports $9.0$ for two points nine steps apart rising nine units.
+Section~\ref{sec:results_xgb} reports that neither change is separable from
+fold noise on this cache, and we retain both on correctness grounds while
+saying so explicitly.
+
+\subsubsection{Class imbalance}
+Imbalance is handled with inverse-frequency \texttt{sample\_weight} computed
+from each training fold's own class counts. It is deliberately \emph{not}
+handled with \texttt{scale\_pos\_weight}, which is a binary-classification
+parameter in XGBoost and has no defined effect under
+\texttt{multi:softprob} with \texttt{num\_class=3}. \texttt{num\_class=3} is
+set explicitly rather than inferred, because a training fold can legitimately
+contain no Established windows --- only 118 exist in the entire real cache
+--- and the positive-score reduction indexes the third column.
+
+\subsubsection{Tuning and calibration}
+Hyperparameters are searched on the \textbf{training fold only}, scored by
+grouped inner cross-validation over that fold's wells, across a 16-point
+grid. Both conditions of a fold share the configuration selected on that
+fold's real training wells, so \texttt{real\_only} and
+\texttt{real\_plus\_sim} differ only in training data and not also in
+hyperparameters. The scored quantity is validation PR-AUC on
+$P(\mathrm{Transient}) + P(\mathrm{Established})$ --- the same reduction the
+alarm logic consumes --- and sample weights are applied inside the search
+exactly as at final fit time.
+
+Because Module~8 selects the alarm threshold by sweeping a probability axis,
+the probabilities must mean what they say. Weighted training on a 3\%
+positive rate pushes scores away from the base rate by construction, so
+miscalibration is expected rather than incidental. A Platt calibrator is fit
+on the \textbf{validation} fold and applied \textbf{unchanged} to that fold's
+test wells; Platt is preferred over isotonic because a validation fold holds
+only a handful of positive events, where a non-parametric fit would track
+noise.
 
 % ---- IV-B. Architectures (M4) ----
 \subsection{Model Architectures}
@@ -249,14 +328,167 @@ for positive and normal wells, fold report (Table~1), simulation data policy.}
 \subsection{XGBoost Baseline}
 \label{sec:results_xgb}
 
-% TODO (M3): Write XGBoost results.
-% - Table: PR-AUC, event recall, FAR, lead time for real_only and real_plus_sim
-% - Feature importance discussion: compare top features with physical hydrate signature
-% - This is the Discussion section's strongest paragraph
+% Written by M3. Source draft: report/results_xgboost.md, which lists the
+% exact command behind every number here.
 
-\placeholder{M3 writes XGBoost results: performance under real\_only and
-real\_plus\_sim conditions, feature importance analysis linked to physical
-hydrate indicators in the 3W descriptor.}
+\subsubsection{Validation performance}
+Table~\ref{tab:xgb_folds} gives validation PR-AUC over the three grouped
+folds at a positive-window base rate of $0.0334$.
+
+\begin{table}[t]
+\centering
+\caption{XGBoost validation PR-AUC per fold (seed 42). The standard
+deviation exceeds the mean; see Section~\ref{sec:results_xgb} for why.}
+\label{tab:xgb_folds}
+\begin{tabular}{cccc}
+\toprule
+Fold & Positive val.\ events & \texttt{real\_only} & \texttt{real\_plus\_sim} \\
+\midrule
+0 & 1 & 0.0005 & 0.0003 \\
+1 & 3 & \textbf{0.7755} & 0.2420 \\
+2 & 5 & 0.0751 & 0.1288 \\
+\midrule
+\multicolumn{2}{c}{mean $\pm$ sd} & $0.284 \pm 0.428$ & $0.124 \pm 0.121$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Simulated data did not help. The paired difference
+(\texttt{real\_plus\_sim} $-$ \texttt{real\_only}) is $-0.160 \pm 0.325$,
+negative in two of three folds. This is a distribution argument rather than
+a sample-size one: the simulated windows are \textbf{90.3\%} positive
+(39{,}561 of 43{,}829) against a \textbf{3.34\%} real positive rate, and they
+inflate the training set from roughly 19k to 63k rows, pulling the model
+toward a regime that does not exist in the real wells it is scored on.
+\texttt{real\_only} is therefore the headline condition.
+
+\subsubsection{PR-AUC is not comparable across these folds}
+\label{sec:results_baserate}
+Each fold's validation split has a different positive base rate, and PR-AUC
+rises mechanically with it. Fold~0's validation set contains \textbf{exactly
+one positive window} out of 11{,}260 (base rate $10^{-4}$), fold~1 has 463
+of 7{,}327 ($0.0632$) and fold~2 has 638 of 11{,}592 ($0.0550$) --- more
+than two orders of magnitude apart. A PR-AUC computed from a single positive
+row is that row's reciprocal rank, not a performance estimate. Read as lift
+over each fold's own base rate, the baseline is above chance in all three
+folds ($1.4\times$, $12.3\times$, $3.5\times$) rather than at chance in two
+of them, which is what the raw column suggests.
+
+This is not a pedantic point, and we report it because the uncorrected
+analysis is the natural one to run and it misleads. On raw PR-AUC the number
+of positive validation events correlates strongly with score across the
+ablation's 18 cells (Spearman $\rho = 0.638$, $p = 0.0044$), which invites
+the conclusion that sparse folds cannot measure anything. That correlation
+\textbf{does not survive base-rate correction}: on lift, $\rho = -0.14$
+($p = 0.58$). Folds with more positive events also have higher base rates.
+The same trap applies to any per-fold PR-AUC comparison in this project,
+including the head-to-head model table.
+
+\subsubsection{Fold composition dominates every other source of variance}
+The feature ablation ran 9 extractor variants over 18 paired cells (3 CV
+split seeds $\times$ 3 folds $\times$ 2 model seeds) on validation folds
+only. Decomposing the variance across those 162 runs on the
+base-rate-corrected scale, the variance of the feature-design arm means is
+$2.09\times10^{-2}$ while the variance of the fold-cell means is $0.988$:
+fold composition accounts for roughly \textbf{47$\times$} more spread than
+the entire feature-design space we searched. (On the raw scale the ratio is
+$448\times$, but part of that is the base-rate artifact above rather than
+genuine instability.) Anything selected on validation PR-AUC in a
+single-positive-window fold --- including the deep models' early stopping
+and Module~8's threshold selection --- is selected on noise.
+
+One training fold could not be tuned at all: in fold~1 every positive window
+in the training split belongs to a \emph{single} well, so grouped inner
+cross-validation cannot produce a split with positives on both sides. All
+three inner splits were unusable and that fold fell back to the default
+configuration. With 7 positive wells and 3 outer folds this is a structural
+property of the dataset, not an accident of one seed.
+
+\subsubsection{Feature-design ablation: null results}
+Arms were compared as paired differences on identical folds and seeds and
+tested with a Wilcoxon signed-rank test, restricted to the 10 cells where
+validation PR-AUC is estimable, and expressed as base-rate-corrected lift
+ratios per Section~\ref{sec:results_baserate}. The presence-fraction block
+is worth $1.175\times$ (7/10 wins, $p = 0.027$); one timescale versus three
+$1.027\times$ ($p = 0.92$); \texttt{NaN} versus $0.0$ encoding of a dead
+sensor $1.025\times$ ($p = 0.77$); the slope's time axis $0.977\times$
+($p = 0.63$); two timescales versus three $0.914\times$ ($p = 0.23$).
+
+Only the presence-fraction block separates from noise, and it does so on
+both the raw and corrected scales; everything else is within 3\% of parity.
+Even that result would not survive a Bonferroni correction for the six
+comparisons made ($p < 0.0083$), so we read it as suggestive --- but it is the only arm
+where direction, win count and $p$-value agree, and
+Section~\ref{sec:results_shortcut} supplies an independent mechanism for
+why. We retain the two changed defaults on correctness grounds --- $0.0$ is
+the value a healthy sensor at its own baseline reports, and a slope
+regressed on sample rank is not a rate --- rather than claiming the numbers
+supported them. Three timescales are kept because the module contract
+specifies them; one timescale (35 features instead of 95) performs the same
+within noise.
+
+\subsubsection{The baseline partly reads instrumentation, not physics}
+\label{sec:results_shortcut}
+Gain importance on fold~1, the only fold with substantial validation signal,
+placed \textbf{40.8\% of the total gain on the 5 presence-fraction columns}
+out of 95. We tested the implication directly by training on those columns
+\emph{only}, with no sensor values of any kind, over 9 fold-cells. The
+presence-only model reaches a mean validation PR-AUC of \textbf{0.172}
+against \textbf{0.233} for the full 95-feature model --- \textbf{74\% of the
+full performance without seeing a single pressure or temperature reading}
+--- and in 2 of 9 cells it \emph{outperforms} all 90 value features (0.493
+versus 0.354, and 0.284 versus 0.259).
+
+The explanation is in the dataset. Missingness here is well-specific:
+different wells instrument different sensors, and some sensors are dead for
+an entire instance. Because the hydrate wells and the Normal-operation wells
+are disjoint populations, sensor availability is a proxy for well identity,
+and well identity is very nearly the label. Per-instance normalisation, the
+project's main defence against well-identity confounding, removes each
+recording's offset and scale but cannot remove \emph{``this channel is
+absent''}, which lives in the mask rather than in the values.
+
+Consistently with this, permutation importance neither reproduces the
+expected physical signature nor reproduces itself across folds: pairwise
+rank agreement is nil (Kendall $\tau = +0.20, +0.40, -0.40$; all
+$p > 0.48$). In fold~1 the top-ranked channel is \texttt{P-ANULAR}, the
+annulus, which does not communicate with the service line, while
+\texttt{P-MON-CKP} --- the pressure upstream of the production choke, which
+the restriction mechanism predicts should dominate --- ranks last with a
+mean share of $0.002$. \textbf{We therefore do not claim that the baseline
+recovered the physical hydrate signature.} Claiming otherwise would have
+required quoting one fold and ignoring the other two.
+
+\subsubsection{Calibration}
+Calibration behaved as intended in every fold and both conditions. Platt
+scaling fit on validation reduced expected calibration error from $0.0409$
+to $0.0106$ under \texttt{real\_only} and from $0.0538$ to $0.0121$ under
+\texttt{real\_plus\_sim} (a 74--78\% reduction), and the Brier score by 29\%
+in both, improving in all 6 fold~$\times$~condition cells. Because Module~8
+selects the alarm threshold by sweeping a probability axis, this is a
+prerequisite for that threshold to transfer, not a cosmetic step.
+Fig.~\ref{fig:reliability} shows the before/after curves with a per-bin count
+panel beneath; at a 3\% positive rate the high-probability bins hold very few
+windows, and a reliability curve that hides bin populations makes a handful
+of unlucky windows look like systematic miscalibration.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{reliability_xgboost.png}
+\caption{Reliability of the XGBoost baseline on a validation fold, before
+and after Platt scaling. Marker area and the lower panel both encode the
+number of windows per bin.}
+\label{fig:reliability}
+\end{figure}
+
+\subsubsection{Tuning budget}
+The search evaluated the full 16-configuration grid per fold under grouped
+inner CV, and both conditions of a fold share the configuration selected on
+that fold's real training wells, so the two conditions differ only in
+training data. Selected configurations were consistent
+(\texttt{max\_depth}~$=3$, \texttt{n\_estimators}~$=300$ in both tunable
+folds): the search preferred the smallest and shallowest models offered,
+the expected outcome with roughly 1{,}400 positive windows.
 
 % Auto-generated table
 % \input{tables/pr_auc.tex}
@@ -376,7 +608,58 @@ T.~Y.~Lin, P.~Goyal, R.~Girshick, K.~He, and P.~Dollár, ``Focal loss
 for dense object detection,'' in \emph{Proc. ICCV}, 2017.
 
 % TODO: M4 adds related work references here
-% TODO: M3 adds feature engineering / industrial process monitoring references
+
+% ---- M3: baseline, calibration and importance references ----
+\bibitem{xgboost}
+T.~Chen and C.~Guestrin, ``XGBoost: a scalable tree boosting system,'' in
+\emph{Proc.\ ACM SIGKDD}, 2016, pp.~785--794.
+
+\bibitem{platt}
+J.~Platt, ``Probabilistic outputs for support vector machines and
+comparisons to regularized likelihood methods,'' in \emph{Advances in Large
+Margin Classifiers}, MIT Press, 1999, pp.~61--74.
+
+\bibitem{niculescu}
+A.~Niculescu-Mizil and R.~Caruana, ``Predicting good probabilities with
+supervised learning,'' in \emph{Proc.\ ICML}, 2005, pp.~625--632.
+
+\bibitem{guo}
+C.~Guo, G.~Pleiss, Y.~Sun, and K.~Q.~Weinberger, ``On calibration of modern
+neural networks,'' in \emph{Proc.\ ICML}, 2017, pp.~1321--1330.
+
+\bibitem{breiman}
+L.~Breiman, ``Random forests,'' \emph{Machine Learning}, vol.~45, no.~1,
+pp.~5--32, 2001. (Permutation importance.)
+
+\bibitem{strobl}
+C.~Strobl, A.~L.~Boulesteix, A.~Zeileis, and T.~Hothorn, ``Bias in random
+forest variable importance measures: illustrations, sources and a
+solution,'' \emph{BMC Bioinformatics}, vol.~8, no.~25, 2007.
+
+\bibitem{saito}
+T.~Saito and M.~Rehmsmeier, ``The precision-recall plot is more informative
+than the ROC plot when evaluating binary classifiers on imbalanced
+datasets,'' \emph{PLoS ONE}, vol.~10, no.~3, 2015.
+
+\bibitem{geirhos}
+R.~Geirhos, J.~H.~Jacobsen, C.~Michaelis, R.~Zemel, W.~Brendel, M.~Bethge,
+and F.~A.~Wichmann, ``Shortcut learning in deep neural networks,''
+\emph{Nature Machine Intelligence}, vol.~2, pp.~665--673, 2020.
+
+\bibitem{fawcett}
+C.~Aliferis and G.~Simon, ``Overfitting, underfitting and general model
+overconfidence and under-performance pitfalls and best practices in machine
+learning and AI,'' in \emph{Artificial Intelligence and Machine Learning in
+Health Care and Medical Sciences}, Springer, 2024, pp.~477--524.
+
+\bibitem{qin}
+S.~J.~Qin, ``Survey on data-driven industrial process monitoring and
+diagnosis,'' \emph{Annual Reviews in Control}, vol.~36, no.~2,
+pp.~220--234, 2012.
+
+\bibitem{sleiman}
+E.~D.~Sloan and C.~A.~Koh, \emph{Clathrate Hydrates of Natural Gases},
+3rd~ed. Boca Raton, FL: CRC Press, 2008.
 
 \end{thebibliography}
 
