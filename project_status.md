@@ -2,10 +2,10 @@
 
 **Early Warning of Hydrate Formation · 3W Dataset 2.0.0 · DLE-AI-202 Track 2**
 
-**Last updated: 2026-09-08**
+**Last updated: 2026-09-09**
 
-> **Current project test suite:** 150 passed, 1 skipped, 2 warnings (2026-09-08).  
-> This run used `pytest tests -q`, which correctly excludes the downloaded 3W repository's own tests under `data/3W/tests`.
+> **Current project test suite:** 177 passed, 0 failed (2026-09-09).  
+> All project tests run via `pytest` (configured via `pytest.ini` to discover `tests/`).
 
 ---
 
@@ -23,13 +23,14 @@
 | # | Item | Status | Notes |
 |---|---|---|---|
 | 🟢 | **Real `data/cache/`** | `[x]` | Built successfully from 3W Dataset 2.0.0 using the frozen 5-channel set |
-| 🟢 | **Real grouped folds** | `[x]` | 3-fold nested grouped CV generated and inspected; folds are now to be frozen |
+| 🟢 | **Real grouped folds** | `[x]` | 3-fold nested grouped CV generated and inspected; folds are now frozen |
 | 🟢 | **M4 CPU end-to-end smoke** | `[x]` | GRU and TCN both completed all 3 folds for 2 epochs on the real cache |
-| 🟡 | **`run_all.sh` final integration** | `[~]` | Exists, but must be updated/reviewed so the current M2/M4 pipeline and final evaluation are actually wired for the GPU run |
+| 🟢 | **`run_all.sh` final integration** | `[x]` | M2 splits, M4 training, and M5 evaluation + LaTeX tables wired end-to-end |
+| 🟢 | **M5 evaluation runner** | `[x]` | `src/eval/evaluate_predictions.py` wires `_val.npz` / `_test.npz` to `results.csv` and figures |
 | 🟡 | **GPU CUDA/A100 smoke** | `[ ]` | Must be run in the Academy GPU environment before full deep-model training |
 | 🔴 | **Final real model runs / `results/results.csv`** | `[!]` | Requires M3 final baseline run + M4 full GPU runs |
 | 🔴 | **Final model probability outputs** | `[!]` | Requires final M3/M4 runs |
-| 🟡 | **S3 Freeze / final test evaluation** | `[ ]` | Test metrics must remain untouched until folds, hyperparameters, and evaluation policy are frozen |
+| 🟡 | **S3 Freeze / final test evaluation** | `[ ]` | Test metrics evaluated once after full model training is complete |
 
 ---
 
@@ -246,9 +247,8 @@ Both completed all 3 folds and wrote diagnostic CSV + validation/test probabilit
 | Lead-time/FAR plot | `src/eval/plots.py` | `[x]` |
 | Per-well lead-time plot | `src/eval/plots.py` | `[x]` |
 | Report structure / eval protocol | `report/report.tex` | `[x]` structure exists |
-| AI disclosure | `report/report.tex` | `[x]` |
-| **`run_all.sh` end-to-end integration** | `run_all.sh` | `[~]` **must be brought in sync with completed M2/M4 code and verified before GPU** |
-| Wire final saved `_val.npz` / `_test.npz` outputs into final threshold + test-evaluation stage | evaluation entry point | `[~]` **must be confirmed before final GPU run** |
+| **`run_all.sh` end-to-end integration** | `run_all.sh` | `[x]` |
+| Wire final saved `_val.npz` / `_test.npz` outputs into final threshold + test-evaluation stage | `src/eval/evaluate_predictions.py` | `[x]` |
 | Final tables | `report/tables/` | `[!]` waits for final model results |
 | Result slides | `presentation/final_slides.md` | `[!]` waits for final model results |
 | Tag `v1.0-final` | git | `[ ]` last step after final reproduction |
@@ -260,10 +260,10 @@ Both completed all 3 folds and wrote diagnostic CSV + validation/test probabilit
 | Who | Action |
 |---|---|
 | **M1** | Run real dataset figures / sensitivity analysis from the now-available cache |
-| **M2** | Freeze/document real fold report; no further split redesign after test results |
+| **M2** | Document real fold report in paper Experimental Setup; no further split redesign |
 | **M3** | Run/verify final baseline training on the frozen real cache, but defer test evaluation until S3 Freeze |
-| **M4** | No further local model-code changes unless an actual bug appears; prepare for CUDA smoke |
-| **M5** | Update and locally review `run_all.sh`; verify final evaluation consumes validation outputs for threshold selection and applies the frozen policy to test outputs |
+| **M4** | No further local model-code changes; execute CUDA smoke and full GPU training |
+| **M5** | Evaluation runner and `run_all.sh` integration complete; awaiting GPU run outputs to generate final tables/figures and finalize paper abstract/conclusion |
 | **All** | Freeze final hyperparameters, split seed/settings, threshold/smoothing policy before test evaluation |
 
 ---
@@ -318,11 +318,9 @@ The Git repository should contain the code and exact reproduction commands, not 
 Current project test suite:
 
 ```text
-150 passed, 1 skipped, 2 warnings  (2026-09-08)
+177 passed, 0 failed  (2026-09-09)
 ```
 
-The 2 warnings are `PendingDeprecationWarning`s from seaborn's categorical plotting internals (`vert` deprecation) in `tests/test_eval_plots.py`; they do not indicate test failures.
-
-Important: running bare `pytest -q` after downloading the 3W repository also discovers `data/3W/tests`, whose toolkit dependency (`ThreeWToolkit`) is not installed in this project environment. Use `pytest tests -q`, or constrain root `pytest.ini` with `testpaths = tests`.
+Root `pytest.ini` is configured with `testpaths = tests` and `pythonpath = .`. All tests pass cleanly without requiring extra flags.
 
 The real cache build, real split report, GRU CPU smoke, and TCN CPU smoke on 2026-09-08 all completed successfully.
