@@ -86,16 +86,18 @@ echo ""
 echo "==========================================="
 echo " 3. Generating Folds & Fold Report (M2)"
 echo "==========================================="
-# TODO (M2): uncomment when splits.py split() and fold_report() are implemented
-# python -c "
-# from src.data.splits import GroupedKFoldSplitter
-# import numpy as np, json
-# # Load cache metadata, run splitter, write fold_report to results/
-# print('[splits.py] Fold report generated → results/fold_report.csv')
-# "
-echo "[WAITING FOR M2] splits.py split() and fold_report() not yet implemented."
-echo "  → M2 needs to implement GroupedKFoldSplitter.split() and fold_report()"
-echo "  → Two independent grouped splits: positives + normals (see TEAM_5_MEMBERS.md §3)"
+if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
+  python -m src.data.splits \
+      --cache "$CACHE_DIR" \
+      --n-splits 3 \
+      --n-repeats 1 \
+      --val-mode nested \
+      --seed 42 \
+      --out "$RESULTS_DIR/fold_report.csv"
+  echo "[M2] Fold report generated → $RESULTS_DIR/fold_report.csv"
+else
+  echo "[M2] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
+fi
 
 # ------------------------------------------------------------------
 # Step 4: Baseline Models — XGBoost (M3)
@@ -145,24 +147,37 @@ echo ""
 echo "==========================================="
 echo " 5. Running Deep Models — TCN & GRU (M4)"
 echo "==========================================="
-# TODO (M4): uncomment when train_loop.py fit() is implemented
-# TCN × {real_only, real_plus_sim}
-# python -c "
-# from src.models.tcn import TCN
-# from src.models.train_loop import Trainer
-# # ... assert tcn.receptive_field() >= window_size
-# # ... load cache, run CV, write to results/results.csv
-# "
-# GRU × {real_only, real_plus_sim}  (bidirectional=False)
-# python -c "
-# from src.models.gru import GRUClassifier
-# from src.models.train_loop import Trainer
-# # ... load cache, run CV, write to results/results.csv
-# "
-echo "[WAITING FOR M4] train_loop.py fit(), predict_proba(), load_best_checkpoint() not yet implemented."
-echo "  → M4 needs to implement Trainer.fit() with early stopping on val PR-AUC"
-echo "  → M4 needs to implement Trainer.predict_proba()"
-echo "  → GRU must use bidirectional=False (causality, DL6.1)"
+DEEP_DEVICE="${DEEP_DEVICE:-auto}"
+if [ "$DEEP_DEVICE" = "auto" ]; then
+  if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    DEEP_DEVICE="cuda"
+  else
+    DEEP_DEVICE="cpu"
+  fi
+fi
+
+DEEP_EXTRA_ARGS=""
+if [ "$DEEP_DEVICE" = "cpu" ]; then
+  DEEP_EXTRA_ARGS="--no-amp"
+fi
+
+if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
+  python -m tools.train_deep_models \
+      --cache "$CACHE_DIR" \
+      --models tcn,gru \
+      --conditions real_only,real_plus_sim \
+      --seeds 42 \
+      --n-splits 3 \
+      --n-repeats 1 \
+      --device "$DEEP_DEVICE" \
+      --out-results "$RESULTS_DIR/results.csv" \
+      --outputs-dir "$RESULTS_DIR/model_outputs" \
+      --checkpoint-root checkpoints \
+      ${DEEP_EXTRA_ARGS}
+  echo "[M4] Deep model training complete; probabilities written to $RESULTS_DIR/model_outputs"
+else
+  echo "[M4] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
+fi
 
 # ------------------------------------------------------------------
 # Step 6: Threshold Selection & Test Evaluation (M5)
@@ -171,82 +186,46 @@ echo ""
 echo "==========================================="
 echo " 6. Threshold Selection & Test Evaluation (M5)"
 echo "==========================================="
-# This step runs AFTER all models have produced results.csv entries.
+# This step runs AFTER models have produced results/model_outputs/*.npz.
 # Thresholds are selected on VALIDATION folds ONLY (contract §0.3),
 # then applied UNCHANGED to test folds — the S3 FREEZE point.
-python -c "
-from src.eval.thresholds import select_threshold, select_threshold_curve
-from src.eval.metrics import (
-    positive_score, pr_auc, event_recall,
-    false_alarms_per_operating_hour, expected_calibration_error,
-)
+if [ -d "$RESULTS_DIR/model_outputs" ] && [ -n "$(ls -A "$RESULTS_DIR/model_outputs"/*_val.npz 2>/dev/null)" ]; then
+  python -m src.eval.evaluate_predictions \
+      --outputs-dir "$RESULTS_DIR/model_outputs" \
+      --out-results "$RESULTS_DIR/results.csv" \
+      --figures-dir "$FIGURES_DIR" \
+      --smooth-window 5 \
+      --min-duration 0.0 \
+      --target-far 0.01
+
+  echo "[M5] Generating LaTeX summary tables..."
+  python -c "
 from src.eval.aggregate import load_results, summarize_folds, generate_all_tables
 import os
-
 results_path = '$RESULTS_DIR/results.csv'
-
 if os.path.exists(results_path):
-    print('[M5] Results file found — aggregating...')
     df = load_results(results_path)
     summary = summarize_folds(df)
     summary.to_csv('$RESULTS_DIR/summary.csv', index=False)
-    print(f'  → summary.csv written ({len(summary)} rows)')
-
-    # Generate all LaTeX tables
     generate_all_tables(results_path, '$TABLES_DIR/')
-    print('  → LaTeX tables written to $TABLES_DIR/')
-else:
-    print('[M5] No results.csv found — models have not run yet.')
-    print('  → Threshold selection and test evaluation will run after M3/M4 complete.')
-    print('  → M5 code is READY: select_threshold(), select_threshold_curve(),')
-    print('    expected_calibration_error(), to_latex_table() are all implemented.')
-" 2>&1 || echo "[M5] Aggregation skipped (no results yet)."
+    print('[M5] LaTeX tables written to $TABLES_DIR/')
+"
+else
+  echo "[M5] No model output files in $RESULTS_DIR/model_outputs yet. Skipping evaluation."
+fi
 
 # ------------------------------------------------------------------
-# Step 7: Generate Figures (M5 + M1 + M3)
+# Step 7: Summary & Status
 # ------------------------------------------------------------------
 echo ""
 echo "==========================================="
-echo " 7. Generating Figures"
+echo " 7. Pipeline Summary"
 echo "==========================================="
-python -c "
-import os
-figures_dir = '$FIGURES_DIR'
-
-# M5-owned figures (ready, will produce output once results exist):
-# - plot_lead_time_vs_false_alarm_rate → figures/lead_time_vs_far.png
-# - plot_per_well_lead_time_box → figures/per_well_lead_time.png
-
-# M1-owned figure (waiting for M1):
-# - plot_annotated_trace → figures/annotated_trace.png
-
-# M3-owned figure (DONE, written by step 4):
-# - plot_reliability_diagram -> figures/reliability_xgboost.png
-
-results_path = '$RESULTS_DIR/results.csv'
-if os.path.exists(results_path):
-    print('[Figures] Results found — generating M5-owned figures...')
-    # When results exist, the plotting functions can be called here
-    # with the actual data.
-else:
-    print('[Figures] No results yet — figure generation deferred.')
-    print('  → M5 plot functions are implemented and tested.')
-    print('  → Waiting for model results from M3 (XGBoost) and M4 (TCN/GRU).')
-" 2>&1
-
-echo ""
-echo "==========================================="
-echo " Pipeline Complete!"
-echo "==========================================="
-echo ""
-echo " Expected outputs (once all modules are ready):"
+echo " Expected outputs (once full GPU runs complete):"
 echo "   $RESULTS_DIR/results.csv     — per-fold raw metrics"
 echo "   $RESULTS_DIR/summary.csv     — mean ± std aggregation"
 echo "   $TABLES_DIR/*.tex            — LaTeX tables for report"
 echo "   $FIGURES_DIR/*.png           — all paper figures"
 echo ""
-echo " Pending module implementations:"
-echo "   M2: splits.py (critical path — M3/M4/M5 need folds)"
-echo "   M3: DONE — features, tuning, calibration, importance, reliability figure"
-echo "   M4: train_loop.py (fit, predict_proba, load_best_checkpoint)"
+echo " Pipeline Complete!"
 echo "==========================================="
