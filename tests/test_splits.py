@@ -23,7 +23,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
+import logging
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -486,3 +488,100 @@ def test_too_few_positive_wells_is_refused(tmp_path):
                 instances=idx.inst_id, well_hours=idx.hours_by_well,
             )
         )
+
+
+def test_warns_when_training_has_fewer_than_two_real_positive_wells(caplog):
+    
+    table = pd.DataFrame(
+        {
+            "n_windows": [100, 100, 100, 100],
+            "n_positive_windows": [20, 20, 0, 0],
+            "n_positive_events": [1, 1, 0, 0],
+            "is_sim": [False, False, False, False],
+            "normal_hours": [0.0, 0.0, 400.0, 400.0],
+            "is_positive_well": [True, True, False, False],
+        },
+        index=[1, 2, 3, 4],
+    )
+
+    splitter = GroupedKFoldSplitter(
+        n_splits=2,
+        strict=False,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        splitter._check_fold(
+            repeat=0,
+            fold=0,
+            table=table,
+            test_wells=(2, 4),
+            val_wells=(3,),
+            train_wells=(1,),
+        )
+
+    assert "only 1 real positive well" in caplog.text
+
+def test_strict_mode_raises_for_thin_positive_training():
+    table = pd.DataFrame(
+        {
+            "n_windows": [100, 100, 100, 100],
+            "n_positive_windows": [20, 20, 0, 0],
+            "n_positive_events": [1, 1, 0, 0],
+            "is_sim": [False, False, False, False],
+            "normal_hours": [0.0, 0.0, 400.0, 400.0],
+            "is_positive_well": [True, True, False, False],
+        },
+        index=[1, 2, 3, 4],
+    )
+
+    splitter = GroupedKFoldSplitter(
+        n_splits=2,
+        strict=True,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="only 1 real positive well",
+    ):
+        splitter._check_fold(
+            repeat=0,
+            fold=0,
+            table=table,
+            test_wells=(2, 4),
+            val_wells=(3,),
+            train_wells=(1,),
+        )
+
+
+def test_fold_report_contains_positive_well_counts():
+    y = np.array([1, 0, 1, 0, 0, 0])
+    groups = np.array([0, 1, 2, 3, 4, 5])
+    is_sim = np.zeros(len(y), dtype=bool)
+    instances = np.arange(len(y))
+
+    well_hours = {
+        0: 0.0,
+        1: 400.0,
+        2: 0.0,
+        3: 400.0,
+        4: 400.0,
+        5: 400.0,
+    }
+
+    splitter = GroupedKFoldSplitter(
+        n_splits=2,
+        min_test_normal_hours=0.0,
+        min_val_normal_hours=0.0,
+    )
+
+    report = splitter.fold_report(
+        y,
+        groups,
+        is_sim=is_sim,
+        instances=instances,
+        well_hours=well_hours,
+    )
+
+    assert "n_train_positive_wells" in report.columns
+    assert "n_val_positive_wells" in report.columns
+    assert "n_test_positive_wells" in report.columns
