@@ -159,6 +159,7 @@ def load_cache_index(cache_dir: str | Path) -> CacheIndex:
 
     ys, groups, insts, sims, tends, fails, blocks, counts = [], [], [], [], [], [], [], []
     hours_by_well: dict[int, float] = {}
+
     for path in files:
         with np.load(path) as z:
             n = int(len(z["y"]))
@@ -170,6 +171,7 @@ def load_cache_index(cache_dir: str | Path) -> CacheIndex:
             fails.append(np.full(n, float(z["failure_time"]), dtype="float64"))
             blocks.append(np.full(n, float(z["blockage_time"]), dtype="float64"))
             counts.append(n)
+
             g = int(z["group"][0])
             hours_by_well[g] = hours_by_well.get(g, 0.0) + float(z["normal_hours"])
 
@@ -224,13 +226,16 @@ def load_cache(cache_dir: str | Path) -> tuple[np.ndarray, np.ndarray, CacheInde
 
     X = np.concatenate(Xs)
     mask = np.concatenate(masks)
+
     if len(X) != len(index) or len(mask) != len(index):
         raise AssertionError(
             f"cache is inconsistent: X has {len(X)} rows, mask {len(mask)}, metadata "
             f"{len(index)} -- rebuild the cache rather than indexing into this"
         )
+
     if X.ndim != 3:
         raise AssertionError(f"expected channels-first [N, C, W], got shape {X.shape}")
+
     return X, mask, index
 
 
@@ -262,8 +267,7 @@ def _balanced_fold_assignment(
     tolerance: float = 0.10,
 ) -> list[list]:
     """
-    Longest-processing-time-first greedy: heaviest well to the lightest
-    fold.
+    Longest-processing-time-first greedy: heaviest well to the lightest fold.
 
     Balancing on a weight (events, hours) rather than well COUNT is the
     point: 7 wells split 3/2/2 by count still puts 5 of the 14 transient
@@ -277,8 +281,10 @@ def _balanced_fold_assignment(
     per-fold load). Tolerance 0 reduces to textbook LPT.
     """
     wells = list(wells)
+
     if not wells:
         return [[] for _ in range(k)]
+
     shuffled = list(rng.permutation(np.array(wells, dtype=object)))
     order = sorted(shuffled, key=lambda w: -float(weights.get(w, 0.0)))
 
@@ -287,16 +293,21 @@ def _balanced_fold_assignment(
 
     folds: list[list] = [[] for _ in range(k)]
     loads = np.zeros(k, dtype=float)
+
     for well in order:
         candidates = np.flatnonzero(loads <= loads.min() + slack)
         j = int(rng.choice(candidates))
         folds[j].append(well)
         loads[j] += float(weights.get(well, 0.0))
+
     return folds
 
 
 def _val_normal_wells(
-    pool: Sequence, hours: Mapping, floor: float, rng: np.random.Generator
+    pool: Sequence,
+    hours: Mapping,
+    floor: float,
+    rng: np.random.Generator,
 ) -> list:
     """
     Pick validation Normal wells by HOURS, smallest first, until `floor` is
@@ -308,17 +319,25 @@ def _val_normal_wells(
     and they make the validation set more diverse at the same time.
     """
     pool = list(pool)
+
     if len(pool) <= 1:
         return []
-    ordered = sorted(rng.permutation(np.array(pool, dtype=object)),
-                     key=lambda w: float(hours.get(w, 0.0)))
+
+    ordered = sorted(
+        rng.permutation(np.array(pool, dtype=object)),
+        key=lambda w: float(hours.get(w, 0.0)),
+    )
+
     picked: list = []
     total = 0.0
-    for well in ordered[:-1]:          # keep at least one Normal well in train
+
+    for well in ordered[:-1]:  # keep at least one Normal well in train
         if total >= floor:
             break
+
         picked.append(well)
         total += float(hours.get(well, 0.0))
+
     return picked
 
 
@@ -334,27 +353,39 @@ class GroupedKFoldSplitter:
         wells, 5 folds leaves 1-2 positive wells per test fold and the
         per-fold metrics stop being estimable. Decide from fold_report()
         and justify the choice in the report.
+
     n_repeats
         Repeats of the whole scheme with a reshuffled assignment. Reduced
         to 1 for the 7 Sep deadline (TEAM_5_MEMBERS.md §0).
+
     val_mode
-        "nested" (default): partition this fold's training wells into
-        round(1/val_frac) balanced parts and validate on one of them.
+        "nested" (default): validation is carved from the training pool.
+        Positive wells are selected by an event-balanced slice, while
+        Normal wells are added smallest-first until the validation
+        Normal-hours floor is met.
+
         "rotate": fold i validates on fold (i+1)'s wells -- simpler, but
         at k=3 it leaves the model less training data than validation data.
+
     min_test_normal_hours
         Fold-level sanity floor for the false-alarm denominator. A fold
         below this cannot support a 1-per-100-h budget; the splitter warns
         (or raises, with `strict=True`) instead of letting M5 compute a
-        threshold on 46 hours of Normal.
+        threshold on too little Normal exposure.
+
     min_val_normal_hours
         The same floor on the VALIDATION side, where Module 8 actually
         selects the threshold. Only used by val_mode="nested"; it is what
         decides how many Normal wells validation borrows from training.
+
     include_sim_in_train
         False reproduces the `real_only` condition of Result 1; True the
         `real_plus_sim` condition. Simulated wells are never eligible for
         val/test either way.
+
+    strict
+        If False, fold-quality problems are logged as warnings. Leakage
+        remains a hard error. If True, fold-quality problems also raise.
     """
 
     def __init__(
@@ -371,7 +402,10 @@ class GroupedKFoldSplitter:
         strict: bool = False,
     ) -> None:
         if val_mode not in ("nested", "rotate"):
-            raise ValueError(f"val_mode must be 'nested' or 'rotate', got {val_mode!r}")
+            raise ValueError(
+                f"val_mode must be 'nested' or 'rotate', got {val_mode!r}"
+            )
+
         self.n_splits = n_splits
         self.n_repeats = n_repeats
         self.val_frac = val_frac
@@ -404,30 +438,50 @@ class GroupedKFoldSplitter:
         """
         y = np.asarray(y)
         groups = np.asarray(groups)
+
         if len(y) != len(groups):
-            raise ValueError(f"y has {len(y)} rows but groups has {len(groups)}")
+            raise ValueError(
+                f"y has {len(y)} rows but groups has {len(groups)}"
+            )
 
         if is_sim is None:
-            is_sim = np.array([_is_sim_group(g) for g in groups], dtype=bool)
+            is_sim = np.array(
+                [_is_sim_group(g) for g in groups],
+                dtype=bool,
+            )
+
             if groups.dtype.kind in "iu":
                 logger.warning(
                     "groups are integer ids and is_sim was not passed -- assuming "
                     "no simulated instances. Pass is_sim (CacheIndex.is_sim) or "
                     "simulated wells may leak into val/test folds."
                 )
+
         is_sim = np.asarray(is_sim).astype(bool)
 
-        df = pd.DataFrame({"group": groups, "y": y, "is_sim": is_sim})
+        df = pd.DataFrame(
+            {
+                "group": groups,
+                "y": y,
+                "is_sim": is_sim,
+            }
+        )
+
         if instances is not None:
             df["inst"] = np.asarray(instances)
 
         rows = []
+
         for well, part in df.groupby("group", sort=True):
             positive = part["y"] > 0
+
             if instances is not None:
-                n_events = int(part.loc[positive, "inst"].nunique())
+                n_events = int(
+                    part.loc[positive, "inst"].nunique()
+                )
             else:
                 n_events = int(positive.sum())
+
             rows.append(
                 {
                     "well": well,
@@ -435,27 +489,39 @@ class GroupedKFoldSplitter:
                     "n_positive_windows": int(positive.sum()),
                     "n_positive_events": n_events,
                     "is_sim": bool(part["is_sim"].any()),
-                    "normal_hours": float((well_hours or {}).get(well, 0.0)),
+                    "normal_hours": float(
+                        (well_hours or {}).get(well, 0.0)
+                    ),
                 }
             )
+
         table = pd.DataFrame(rows).set_index("well")
-        table["is_positive_well"] = table["n_positive_windows"] > 0
+        table["is_positive_well"] = (
+            table["n_positive_windows"] > 0
+        )
+
         return table
 
     def _n_folds(self, n_positive_wells: int) -> int:
         if self.n_splits == LEAVE_ONE_WELL_OUT:
             return n_positive_wells
+
         if self.n_splits < 2:
             raise ValueError(
-                f"n_splits must be >= 2 or LEAVE_ONE_WELL_OUT (-1), got {self.n_splits}"
+                f"n_splits must be >= 2 or LEAVE_ONE_WELL_OUT (-1), "
+                f"got {self.n_splits}"
             )
+
         if self.n_splits > n_positive_wells:
             raise ValueError(
-                f"n_splits={self.n_splits} but only {n_positive_wells} well(s) carry a "
-                f"positive window -- at least one test fold would contain zero "
-                f"positives and its event recall would be undefined. Lower n_splits "
-                f"(DATA_FINDINGS.md §6 recommends 3) or use LEAVE_ONE_WELL_OUT."
+                f"n_splits={self.n_splits} but only {n_positive_wells} "
+                f"well(s) carry a positive window -- at least one test "
+                f"fold would contain zero positives and its event recall "
+                f"would be undefined. Lower n_splits "
+                f"(DATA_FINDINGS.md §6 recommends 3) or use "
+                f"LEAVE_ONE_WELL_OUT."
             )
+
         return self.n_splits
 
     def iter_folds(
@@ -473,26 +539,64 @@ class GroupedKFoldSplitter:
         this, so the table in the report describes exactly the folds the
         models were trained on.
         """
-        table = self._well_table(y, groups, is_sim, instances, well_hours)
+        table = self._well_table(
+            y,
+            groups,
+            is_sim,
+            instances,
+            well_hours,
+        )
+
         real = table[~table["is_sim"]]
-        positive_wells = list(real.index[real["is_positive_well"]])
-        normal_wells = list(real.index[~real["is_positive_well"]])
+
+        positive_wells = list(
+            real.index[real["is_positive_well"]]
+        )
+        normal_wells = list(
+            real.index[~real["is_positive_well"]]
+        )
+
         if not positive_wells:
-            raise ValueError("no well carries a positive window -- cannot build folds")
+            raise ValueError(
+                "no well carries a positive window -- cannot build folds"
+            )
 
         k = self._n_folds(len(positive_wells))
+
         pos_weight = real["n_positive_events"].to_dict()
         hour_weight = real["normal_hours"].to_dict()
-        sim_wells = set(table.index[table["is_sim"]])
+
+        sim_wells = set(
+            table.index[table["is_sim"]]
+        )
         positive_set = set(positive_wells)
 
         for repeat in range(self.n_repeats):
-            rng = np.random.default_rng(self.random_state + repeat)
-            pos_folds = _balanced_fold_assignment(positive_wells, pos_weight, k, rng)
-            norm_folds = _balanced_fold_assignment(normal_wells, hour_weight, k, rng)
+            rng = np.random.default_rng(
+                self.random_state + repeat
+            )
+
+            pos_folds = _balanced_fold_assignment(
+                positive_wells,
+                pos_weight,
+                k,
+                rng,
+            )
+
+            norm_folds = _balanced_fold_assignment(
+                normal_wells,
+                hour_weight,
+                k,
+                rng,
+            )
 
             fold_wells = [
-                tuple(sorted(set(pos_folds[i]) | set(norm_folds[i]), key=str))
+                tuple(
+                    sorted(
+                        set(pos_folds[i]) | set(norm_folds[i]),
+                        key=str,
+                    )
+                )
                 for i in range(k)
             ]
 
@@ -501,36 +605,93 @@ class GroupedKFoldSplitter:
 
                 if self.val_mode == "rotate":
                     val_wells = fold_wells[(i + 1) % k]
-                else:
-                    # nested: spend a slice of THIS fold's training pool on
-                    # validation. The two populations are chosen by different
-                    # rules because they answer different questions:
-                    #   positives  -> early stopping needs SOME events, so an
-                    #                 event-balanced 1/m slice is enough;
-                    #   normals    -> threshold selection needs enough HOURS to
-                    #                 resolve 1 alarm per 100 h, so wells are
-                    #                 added until the floor is met rather than
-                    #                 by proportion. Taking a proportional
-                    #                 slice instead left one real fold with
-                    #                 4.0 validation hours.
-                    pool = [w for j, g in enumerate(fold_wells) if j != i for w in g]
-                    pool_pos = [w for w in pool if w in positive_set]
-                    pool_norm = [w for w in pool if w not in positive_set]
-                    m = max(2, int(round(1.0 / self.val_frac)))
-                    m = min(m, max(2, len(pool_pos)))
-                    val_pos = _balanced_fold_assignment(pool_pos, pos_weight, m, rng)[0]
-                    val_norm = _val_normal_wells(
-                        pool_norm, hour_weight, self.min_val_normal_hours, rng
-                    )
-                    val_wells = tuple(sorted(set(val_pos) | set(val_norm), key=str))
 
-                held_out = set(test_wells) | set(val_wells)
-                train_wells = set(real.index) - held_out
+                else:
+                    # Nested validation from this fold's training pool.
+                    #
+                    # Positive wells:
+                    # early stopping needs positive events, so take one
+                    # event-balanced validation slice.
+                    #
+                    # Normal wells:
+                    # threshold selection needs enough Normal HOURS, so add
+                    # the smallest Normal wells until the validation floor
+                    # is met, while retaining at least one Normal well in train.
+                    pool = [
+                        w
+                        for j, g in enumerate(fold_wells)
+                        if j != i
+                        for w in g
+                    ]
+
+                    pool_pos = [
+                        w for w in pool
+                        if w in positive_set
+                    ]
+                    pool_norm = [
+                        w for w in pool
+                        if w not in positive_set
+                    ]
+
+                    m = max(
+                        2,
+                        int(round(1.0 / self.val_frac)),
+                    )
+                    m = min(
+                        m,
+                        max(2, len(pool_pos)),
+                    )
+
+                    val_pos = _balanced_fold_assignment(
+                        pool_pos,
+                        pos_weight,
+                        m,
+                        rng,
+                    )[0]
+
+                    val_norm = _val_normal_wells(
+                        pool_norm,
+                        hour_weight,
+                        self.min_val_normal_hours,
+                        rng,
+                    )
+
+                    val_wells = tuple(
+                        sorted(
+                            set(val_pos) | set(val_norm),
+                            key=str,
+                        )
+                    )
+
+                held_out = (
+                    set(test_wells)
+                    | set(val_wells)
+                )
+
+                train_wells = (
+                    set(real.index)
+                    - held_out
+                )
+
                 if self.include_sim_in_train:
                     train_wells |= sim_wells
-                train_wells = tuple(sorted(train_wells, key=str))
 
-                self._check_fold(repeat, i, table, test_wells, val_wells, train_wells)
+                train_wells = tuple(
+                    sorted(
+                        train_wells,
+                        key=str,
+                    )
+                )
+
+                self._check_fold(
+                    repeat,
+                    i,
+                    table,
+                    test_wells,
+                    val_wells,
+                    train_wells,
+                )
+
                 yield FoldSpec(
                     repeat=repeat,
                     fold=i,
@@ -539,55 +700,160 @@ class GroupedKFoldSplitter:
                     train_wells=train_wells,
                 )
 
-    def _check_fold(self, repeat, fold, table, test_wells, val_wells, train_wells) -> None:
+    def _check_fold(
+        self,
+        repeat,
+        fold,
+        table,
+        test_wells,
+        val_wells,
+        train_wells,
+    ) -> None:
         """
-        The guards that make the red lines in TEAM_5_MEMBERS.md §9 provable
-        rather than aspirational. Raises on leakage (always) and on an
-        unusable fold (warns, or raises when strict=True).
+        Validate one fold before row indices are exposed downstream.
+
+        Hard guarantees:
+          * no well may appear on more than one split side;
+          * simulated wells may never enter validation or test.
+
+        Fold-quality checks:
+          * validation must contain at least one positive event;
+          * training should retain at least two distinct REAL positive wells;
+          * test must contain enough Normal operating hours for the target FAR.
+
+        With ``strict=False`` the fold-quality checks emit warnings so that
+        small-data limitations can be inspected and reported rather than
+        silently ignored.
+
+        With ``strict=True`` those same conditions raise ValueError and
+        prevent the fold from being used.
         """
-        test_s, val_s, train_s = set(test_wells), set(val_wells), set(train_wells)
-        overlap = (test_s & val_s) | (test_s & train_s) | (val_s & train_s)
+        test_s = set(test_wells)
+        val_s = set(val_wells)
+        train_s = set(train_wells)
+
+        # 1. Well-level leakage check.
+        overlap = (
+            (test_s & val_s)
+            | (test_s & train_s)
+            | (val_s & train_s)
+        )
+
         if overlap:
             raise AssertionError(
-                f"repeat {repeat} fold {fold}: wells {sorted(map(str, overlap))} appear "
-                f"on more than one side of the split -- this is exactly the leakage "
-                f"grouped CV exists to prevent"
+                f"repeat {repeat} fold {fold}: wells "
+                f"{sorted(map(str, overlap))} appear on more than one side "
+                f"of the split -- this is exactly the leakage grouped CV "
+                f"exists to prevent"
             )
 
-        sim_wells = set(table.index[table["is_sim"]])
-        bad_sim = sim_wells & (test_s | val_s)
+        # 2. Simulated-data leakage check.
+        sim_wells = set(
+            table.index[table["is_sim"]]
+        )
+
+        bad_sim = (
+            sim_wells
+            & (test_s | val_s)
+        )
+
         if bad_sim:
             raise AssertionError(
-                f"repeat {repeat} fold {fold}: simulated wells {sorted(map(str, bad_sim))} "
-                f"reached a val/test fold (DL3.2 forbids it)"
+                f"repeat {repeat} fold {fold}: simulated wells "
+                f"{sorted(map(str, bad_sim))} reached a val/test fold "
+                f"(DL3.2 forbids it)"
             )
 
-        val_events = (
-            int(table.loc[list(val_wells), "n_positive_events"].sum()) if val_wells else 0
-        )
-        if val_events == 0:
-            msg = (
-                f"repeat {repeat} fold {fold}: validation fold has zero positive events. "
-                f"Early stopping on PR-AUC and threshold selection are both undefined "
-                f"here -- lower n_splits or switch val_mode."
+        # 3. Training positive-well diversity.
+        real_train_wells = [
+            w
+            for w in train_wells
+            if w not in sim_wells
+        ]
+
+        train_positive_wells = [
+            w
+            for w in real_train_wells
+            if bool(
+                table.loc[
+                    w,
+                    "is_positive_well",
+                ]
             )
+        ]
+
+        if len(train_positive_wells) < 2:
+            msg = (
+                f"repeat {repeat} fold {fold}: training split contains only "
+                f"{len(train_positive_wells)} real positive well(s): "
+                f"{sorted(map(str, train_positive_wells))}. "
+                f"Unseen-well generalisation is poorly identified when the "
+                f"model learns positive behaviour from fewer than 2 real wells. "
+                f"Consider redesigning validation allocation or report this "
+                f"explicitly as a limitation."
+            )
+
             if self.strict:
                 raise ValueError(msg)
+
             logger.warning(msg)
 
-        test_hours = 0.0
-        if test_wells:
-            sub = table.loc[list(test_wells)]
-            test_hours = float(sub.loc[~sub["is_positive_well"], "normal_hours"].sum())
-        if test_hours < self.min_test_normal_hours:
-            msg = (
-                f"repeat {repeat} fold {fold}: only {test_hours:.1f} Normal hours in the "
-                f"test fold (floor {self.min_test_normal_hours:.0f} h). A 1-alarm-per-100-h "
-                f"budget cannot be measured on this fold; report it as a limitation or "
-                f"reduce the number of folds."
+        # 4. Validation must contain positive events.
+        val_events = (
+            int(
+                table.loc[
+                    list(val_wells),
+                    "n_positive_events",
+                ].sum()
             )
+            if val_wells
+            else 0
+        )
+
+        if val_events == 0:
+            msg = (
+                f"repeat {repeat} fold {fold}: validation fold has zero "
+                f"positive events. Early stopping on PR-AUC and threshold "
+                f"selection are undefined here -- lower n_splits or switch "
+                f"val_mode."
+            )
+
             if self.strict:
                 raise ValueError(msg)
+
+            logger.warning(msg)
+
+        # 5. Test Normal-hours floor.
+        test_hours = 0.0
+
+        if test_wells:
+            sub = table.loc[
+                list(test_wells)
+            ]
+
+            normal_only = sub[
+                ~sub["is_positive_well"]
+            ]
+
+            test_hours = float(
+                normal_only[
+                    "normal_hours"
+                ].sum()
+            )
+
+        if test_hours < self.min_test_normal_hours:
+            msg = (
+                f"repeat {repeat} fold {fold}: only "
+                f"{test_hours:.1f} Normal hours in the test fold "
+                f"(floor {self.min_test_normal_hours:.0f} h). "
+                f"A 1-alarm-per-100-h budget cannot be measured reliably "
+                f"on this fold; report it as a limitation or reduce the "
+                f"number of folds."
+            )
+
+            if self.strict:
+                raise ValueError(msg)
+
             logger.warning(msg)
 
     # -- public API --------------------------------------------------------
@@ -601,7 +867,13 @@ class GroupedKFoldSplitter:
         is_sim: np.ndarray | None = None,
         instances: np.ndarray | None = None,
         well_hours: Mapping | None = None,
-    ) -> Iterator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    ) -> Iterator[
+        tuple[
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ]
+    ]:
         """
         Yield (train_idx, val_idx, test_idx) row indices per (repeat, fold).
 
@@ -609,23 +881,55 @@ class GroupedKFoldSplitter:
         checked -- the split is decided from `groups` and `y` alone.
         """
         groups = np.asarray(groups)
+
         if X is not None and len(X) != len(groups):
-            raise ValueError(f"X has {len(X)} rows but groups has {len(groups)}")
+            raise ValueError(
+                f"X has {len(X)} rows but groups has {len(groups)}"
+            )
 
         for spec in self.iter_folds(
-            y, groups, is_sim=is_sim, instances=instances, well_hours=well_hours
+            y,
+            groups,
+            is_sim=is_sim,
+            instances=instances,
+            well_hours=well_hours,
         ):
-            train_idx = np.flatnonzero(np.isin(groups, spec.train_wells))
-            val_idx = np.flatnonzero(np.isin(groups, spec.val_wells))
-            test_idx = np.flatnonzero(np.isin(groups, spec.test_wells))
-            if len(np.intersect1d(train_idx, test_idx)) or len(
-                np.intersect1d(val_idx, test_idx)
+            train_idx = np.flatnonzero(
+                np.isin(
+                    groups,
+                    spec.train_wells,
+                )
+            )
+
+            val_idx = np.flatnonzero(
+                np.isin(
+                    groups,
+                    spec.val_wells,
+                )
+            )
+
+            test_idx = np.flatnonzero(
+                np.isin(
+                    groups,
+                    spec.test_wells,
+                )
+            )
+
+            if (
+                len(np.intersect1d(train_idx, test_idx))
+                or len(np.intersect1d(val_idx, test_idx))
             ):
                 raise AssertionError(
-                    f"repeat {spec.repeat} fold {spec.fold}: row-level overlap between "
-                    f"splits despite disjoint wells -- groups array is inconsistent"
+                    f"repeat {spec.repeat} fold {spec.fold}: row-level overlap "
+                    f"between splits despite disjoint wells -- groups array is "
+                    f"inconsistent"
                 )
-            yield train_idx, val_idx, test_idx
+
+            yield (
+                train_idx,
+                val_idx,
+                test_idx,
+            )
 
     def fold_report(
         self,
@@ -642,75 +946,147 @@ class GroupedKFoldSplitter:
 
         Run this BEFORE any model training (DL3.3). It is what tells you
         whether n_splits is sane given 14 positive instances over 7 wells.
-        Two columns decide that:
 
-          n_val_positive_events   0 => early stopping / threshold selection
-                                  are undefined for that fold.
-          test_normal_hours       the false-alarm denominator (added on top
-                                  of the statement's column list, per
-                                  DATA_FINDINGS.md §2.3). Below ~300 h a
-                                  1-per-100-h budget is not measurable.
+        Important columns:
+
+          n_train_positive_wells
+              Fewer than 2 means the learner sees positive behaviour from
+              only one real well in training, making unseen-well
+              generalisation poorly identified.
+
+          n_val_positive_events
+              0 means validation PR-AUC / threshold selection are undefined.
+
+          test_normal_hours
+              The false-alarm denominator. Below ~300 h, a 1-per-100-h
+              operating point is not well measurable.
 
         `test_normal_hours` sums `normal_hours` over the test wells that
         carry NO positive window. That is deliberately not the same set as
-        "the class-0 folder": 43 of the 57 real Event-9 instances never
-        reach a positive phase (DATA_FINDINGS.md §3), and build_cache
-        records no class-folder flag (every file is loaded with
-        event_code=9), so the cache cannot tell a class-0 recording from a
-        quiet class-9 one. Both are all-Normal recordings, so both are
-        legitimate false-alarm denominators -- the quiet hydrate-well ones
-        are simply the harder negatives.
+        "the class-0 folder": quiet hydrate-event recordings are still
+        legitimate false-alarm denominators if all of their retained
+        windows are Normal.
 
         Normal stretches INSIDE a positive well are excluded, which is the
         conservative direction: it can only understate the denominator,
-        never inflate it. If src/eval/thresholds.py wants those hours too,
-        that is a deliberate widening to agree on, not a silent one.
+        never inflate it.
         """
-        table = self._well_table(y, groups, is_sim, instances, well_hours)
+        table = self._well_table(
+            y,
+            groups,
+            is_sim,
+            instances,
+            well_hours,
+        )
+
         groups_arr = np.asarray(groups)
-        event_col = "n_positive_events" if instances is not None else "n_positive_windows"
+
+        event_col = (
+            "n_positive_events"
+            if instances is not None
+            else "n_positive_windows"
+        )
 
         def _name(w):
-            return str((well_names or {}).get(w, w))
+            return str(
+                (well_names or {}).get(
+                    w,
+                    w,
+                )
+            )
 
         def _side(wells):
             wells = list(wells)
+
             if not wells:
-                return {"wells": 0, "windows": 0, "events": 0, "hours": 0.0, "names": ""}
+                return {
+                    "wells": 0,
+                    "windows": 0,
+                    "events": 0,
+                    "hours": 0.0,
+                    "positive_wells": 0,
+                    "names": "",
+                }
+
             sub = table.loc[wells]
-            normal_only = sub[~sub["is_positive_well"]]
+
+            normal_only = sub[
+                ~sub["is_positive_well"]
+            ]
+
             return {
                 "wells": len(wells),
-                "windows": int(sub["n_windows"].sum()),
-                "events": int(sub[event_col].sum()),
-                "hours": float(normal_only["normal_hours"].sum()),
-                "names": ",".join(sorted(_name(w) for w in wells)),
+                "windows": int(
+                    sub["n_windows"].sum()
+                ),
+                "events": int(
+                    sub[event_col].sum()
+                ),
+                "hours": float(
+                    normal_only[
+                        "normal_hours"
+                    ].sum()
+                ),
+                "positive_wells": int(
+                    (
+                        sub["is_positive_well"]
+                        & ~sub["is_sim"]
+                    ).sum()
+                ),
+                                "names": ",".join(
+                    sorted(
+                        _name(w)
+                        for w in wells
+                    )
+                ),
             }
 
         rows = []
+
         for spec in self.iter_folds(
-            y, groups_arr, is_sim=is_sim, instances=instances, well_hours=well_hours
+            y,
+            groups_arr,
+            is_sim=is_sim,
+            instances=instances,
+            well_hours=well_hours,
         ):
             tr = _side(spec.train_wells)
             va = _side(spec.val_wells)
             te = _side(spec.test_wells)
+
             rows.append(
                 {
                     "repeat": spec.repeat,
                     "fold": spec.fold,
+
                     "n_train_wells": tr["wells"],
                     "n_val_wells": va["wells"],
                     "n_test_wells": te["wells"],
+
+                    "n_train_positive_wells": tr["positive_wells"],
+                    "n_val_positive_wells": va["positive_wells"],
+                    "n_test_positive_wells": te["positive_wells"],
+
                     "n_train_windows": tr["windows"],
                     "n_val_windows": va["windows"],
                     "n_test_windows": te["windows"],
+
                     "n_val_positive_events": va["events"],
                     "n_test_positive_events": te["events"],
-                    "val_normal_hours": round(va["hours"], 1),
-                    "test_normal_hours": round(te["hours"], 1),
+
+                    "val_normal_hours": round(
+                        va["hours"],
+                        1,
+                    ),
+                    "test_normal_hours": round(
+                        te["hours"],
+                        1,
+                    ),
+
                     "test_wells": te["names"],
                 }
             )
+
         return pd.DataFrame(rows)
 
 
@@ -726,24 +1102,64 @@ def _cli() -> None:
     parser = argparse.ArgumentParser(
         description="Print the grouped-CV fold report (Table 1 of the report)."
     )
-    parser.add_argument("--cache", default="data/cache", help="dir written by build_cache")
+
     parser.add_argument(
-        "--n-splits", type=int, default=3, help="folds, or -1 for leave-one-well-out"
+        "--cache",
+        default="data/cache",
+        help="dir written by build_cache",
     )
-    parser.add_argument("--n-repeats", type=int, default=1)
-    parser.add_argument("--val-mode", default="nested", choices=["nested", "rotate"])
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out", default="results/fold_report.csv")
+
+    parser.add_argument(
+        "--n-splits",
+        type=int,
+        default=3,
+        help="folds, or -1 for leave-one-well-out",
+    )
+
+    parser.add_argument(
+        "--n-repeats",
+        type=int,
+        default=1,
+    )
+
+    parser.add_argument(
+        "--val-mode",
+        default="nested",
+        choices=[
+            "nested",
+            "rotate",
+        ],
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+    )
+
+    parser.add_argument(
+        "--out",
+        default="results/fold_report.csv",
+    )
+
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    idx = load_cache_index(args.cache)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(message)s",
+    )
+
+    idx = load_cache_index(
+        args.cache
+    )
+
     splitter = GroupedKFoldSplitter(
         n_splits=args.n_splits,
         n_repeats=args.n_repeats,
         val_mode=args.val_mode,
         random_state=args.seed,
     )
+
     report = splitter.fold_report(
         idx.y,
         idx.group,
@@ -752,12 +1168,36 @@ def _cli() -> None:
         well_hours=idx.hours_by_well,
         well_names=idx.well_of_group,
     )
-    with pd.option_context("display.width", 200, "display.max_columns", 50):
-        print(report.to_string(index=False))
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    report.to_csv(out, index=False)
-    print(f"\nwrote {out}")
+
+    with pd.option_context(
+        "display.width",
+        200,
+        "display.max_columns",
+        50,
+    ):
+        print(
+            report.to_string(
+                index=False
+            )
+        )
+
+    out = Path(
+        args.out
+    )
+
+    out.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    report.to_csv(
+        out,
+        index=False,
+    )
+
+    print(
+        f"\nwrote {out}"
+    )
 
 
 if __name__ == "__main__":
