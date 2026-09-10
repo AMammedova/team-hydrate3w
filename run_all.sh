@@ -1,231 +1,333 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# Single-command reproduction entry point (team contract §0.3/§4.6, W4.6).
-# The brief lists "no run_all entry point" as an automatic deduction --
-# this is that entry point.
+# Single-command reproduction entry point.
 #
 # Usage:
-#   bash run_all.sh [--root data/3W/dataset] [--event 9]
+#   bash run_all.sh
 #
-# From a clean checkout, this script runs the entire pipeline:
-#   1. Data inventory & validation
-#   2. Cache build (windowing, decimation, normalization)
-#   3. Fold generation & fold report
-#   4. Baseline (XGBoost) training & evaluation
-#   5. Deep model (TCN, GRU) training & evaluation
-#   6. Threshold selection & test-fold evaluation
-#   7. Results aggregation, LaTeX tables, figures
+# Optional positional arguments:
+#   bash run_all.sh data/3W/dataset 9
 #
-# Output:
-#   results/results.csv       — per-fold, per-model, per-metric raw data
-#   results/summary.csv       — mean ± std aggregation
-#   report/tables/*.tex       — LaTeX tables for \input in report.tex
-#   figures/*.png             — all paper figures
+# Pipeline:
+#   1. Data inventory
+#   2. Main 5-channel cache build
+#   3. Leak-free grouped fold generation
+#   4. XGBoost training + validation outputs
+#   5. TCN and GRU training + validation/test predictions
+#   6. Validation-only threshold selection followed by ONE frozen test eval
+#   7. Results aggregation, LaTeX tables and figures
 #
-# No number in the paper should ever be typed by hand (team contract §0.3).
+# Frozen experiment settings:
+#   channels       = P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR
+#   folds          = 3
+#   repeats        = 1
+#   split seed     = 42
+#   model seed     = 42
+#   deep batch     = 64
+#   deep LR        = 1e-3
+#   max epochs     = 100
+#   patience       = 10
+#   deep precision = FP32 (--no-amp)
+#
+# NOTE:
+# FP16 and BF16 mixed-precision smoke tests produced non-finite GRU
+# validation probabilities on the project GPU. Final deep-model runs
+# therefore use FP32.
 # ==========================================================================
 
 set -euo pipefail
 
-# Defaults
+
+# --------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------
+
 ROOT="${1:-data/3W/dataset}"
 EVENT="${2:-9}"
+
 CACHE_DIR="data/cache"
-CACHE_TPT_DIR="data/cache_tpt"
 RESULTS_DIR="results"
+OUTPUTS_DIR="$RESULTS_DIR/model_outputs"
 FIGURES_DIR="figures"
-TABLES_DIR="report/tables"
+TABLES_DIR="$RESULTS_DIR/tables"
+CHECKPOINT_DIR="checkpoints/final"
 
-# Channels per TEAM_5_MEMBERS.md §8 / DATA_FINDINGS.md §9
 CHANNELS_MAIN="P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR"
-CHANNELS_SENSITIVITY="P-TPT,T-TPT"
 
-echo "==========================================="
-echo " Hydrate Formation Early Warning — Full Pipeline"
-echo " Root: $ROOT | Event: $EVENT"
-echo "==========================================="
+N_SPLITS=3
+N_REPEATS=1
+SPLIT_SEED=42
+MODEL_SEED=42
 
-# Create output directories
-mkdir -p "$RESULTS_DIR" "$FIGURES_DIR" "$TABLES_DIR"
+BATCH_SIZE=64
+MAX_EPOCHS=100
+PATIENCE=10
+NUM_WORKERS=0
+LEARNING_RATE="1e-3"
 
-# ------------------------------------------------------------------
-# Step 1: Data Inventory
-# ------------------------------------------------------------------
+SMOOTH_WINDOW=5
+MIN_DURATION="0.0"
+TARGET_FAR="0.01"
+
+
+echo "============================================================"
+echo " Hydrate Formation Early Warning — Reproduction Pipeline"
+echo "============================================================"
+echo " Dataset root : $ROOT"
+echo " Event        : $EVENT"
+echo " Cache        : $CACHE_DIR"
+echo " Results      : $RESULTS_DIR"
+echo "============================================================"
+
+
+mkdir -p \
+    "$RESULTS_DIR" \
+    "$OUTPUTS_DIR" \
+    "$FIGURES_DIR" \
+    "$TABLES_DIR" \
+    "$CHECKPOINT_DIR"
+
+
+# ==========================================================================
+# Step 1 — Data inventory
+# ==========================================================================
+
 echo ""
-echo "==========================================="
-echo " 1. Running Data Inventory"
-echo "==========================================="
-python -m src.data.inventory --root "$ROOT" --event "$EVENT"
+echo "============================================================"
+echo " 1. Data Inventory"
+echo "============================================================"
 
-# ------------------------------------------------------------------
-# Step 2: Build Cache (Windowing & Processing)
-#         Main arm (5 channels) + sensitivity arm (2 channels)
-# ------------------------------------------------------------------
+python -m src.data.inventory \
+    --root "$ROOT" \
+    --event "$EVENT"
+
+
+# ==========================================================================
+# Step 2 — Main cache
+# ==========================================================================
+
 echo ""
-echo "==========================================="
-echo " 2. Building Cache (5-channel main arm)"
-echo "==========================================="
+echo "============================================================"
+echo " 2. Building Main 5-Channel Cache"
+echo "============================================================"
+
 python -m src.data.build_cache \
     --root "$ROOT" \
     --out "$CACHE_DIR" \
     --channels "$CHANNELS_MAIN"
 
-echo ""
-echo "==========================================="
-echo " 2b. Building Cache (2-channel sensitivity arm)"
-echo "==========================================="
-python -m src.data.build_cache \
-    --root "$ROOT" \
-    --out "$CACHE_TPT_DIR" \
-    --channels "$CHANNELS_SENSITIVITY"
 
-# ------------------------------------------------------------------
-# Step 3: Generate Folds & Fold Report (M2)
-# ------------------------------------------------------------------
+# ==========================================================================
+# Step 3 — Frozen grouped folds
+# ==========================================================================
+
 echo ""
-echo "==========================================="
-echo " 3. Generating Folds & Fold Report (M2)"
-echo "==========================================="
-if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
-  python -m src.data.splits \
-      --cache "$CACHE_DIR" \
-      --n-splits 3 \
-      --n-repeats 1 \
-      --val-mode nested \
-      --seed 42 \
-      --out "$RESULTS_DIR/fold_report.csv"
-  echo "[M2] Fold report generated → $RESULTS_DIR/fold_report.csv"
+echo "============================================================"
+echo " 3. Generating Frozen Grouped Folds"
+echo "============================================================"
+
+if compgen -G "$CACHE_DIR/*.npz" > /dev/null; then
+
+    python -m src.data.splits \
+        --cache "$CACHE_DIR" \
+        --n-splits "$N_SPLITS" \
+        --n-repeats "$N_REPEATS" \
+        --val-mode nested \
+        --seed "$SPLIT_SEED" \
+        --out "$RESULTS_DIR/fold_report.csv"
+
+    echo "[M2] Fold report written to:"
+    echo "     $RESULTS_DIR/fold_report.csv"
+
 else
-  echo "[M2] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
+
+    echo "[ERROR] No cache .npz files found in $CACHE_DIR"
+    exit 1
+
 fi
 
-# ------------------------------------------------------------------
-# Step 4: Baseline Models — XGBoost (M3)
-# ------------------------------------------------------------------
-echo ""
-echo "==========================================="
-echo " 4. Running Baseline Models — XGBoost (M3)"
-echo "==========================================="
-# M3 owns this step. tools/train_xgb.py runs the full Result-1 baseline matrix
-# (XGBoost x {real_only, real_plus_sim}) and writes, for every fold:
-#   results/results.csv                  validation metrics, contract schema
-#   results/model_outputs/*_val.npz      probabilities Module 8 selects on
-#   results/model_outputs/*_test.npz     probabilities Module 8 scores ONCE
-#   results/tables/*_importance_*.csv    gain + permutation importance
-#   figures/reliability_xgboost.png      before/after calibration
-#
-# --device auto uses the GPU when XGBoost can genuinely see one and falls back
-# to CPU otherwise; it never claims a GPU it did not get.
-#
-# Test METRICS stay off until the S3 freeze. Test probabilities are written
-# every run, because Module 8 needs them; writing predictions is not the same
-# as reading the score. After the freeze, re-run this step with --eval-test.
-XGB_EVAL_TEST="${XGB_EVAL_TEST:-}"
 
-if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
-  python -m tools.train_xgb \
-      --cache "$CACHE_DIR" \
-      --out-results "$RESULTS_DIR/results.csv" \
-      --outputs-dir "$RESULTS_DIR/model_outputs" \
-      --tables-dir "$RESULTS_DIR/tables" \
-      --figures-dir "$FIGURES_DIR" \
-      --conditions real_only,real_plus_sim \
-      --seeds 42 \
-      --n-splits 3 \
-      --device auto \
-      --calibration platt \
-      --append \
-      ${XGB_EVAL_TEST}
-else
-  echo "[M3] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
-fi
+# ==========================================================================
+# Step 4 — XGBoost baseline
+# ==========================================================================
 
-# ------------------------------------------------------------------
-# Step 5: Deep Models — TCN & GRU (M4)
-# ------------------------------------------------------------------
 echo ""
-echo "==========================================="
-echo " 5. Running Deep Models — TCN & GRU (M4)"
-echo "==========================================="
+echo "============================================================"
+echo " 4. XGBoost Baseline"
+echo "============================================================"
+
+# XGBoost writes validation and test PREDICTIONS.
+#
+# It does NOT use test metrics for model or threshold selection.
+# Test predictions remain untouched until Step 6, where the validation
+# operating point is frozen and then applied once to the test folds.
+
+python -m tools.train_xgb \
+    --cache "$CACHE_DIR" \
+    --out-results "$RESULTS_DIR/results.csv" \
+    --outputs-dir "$OUTPUTS_DIR" \
+    --tables-dir "$TABLES_DIR" \
+    --figures-dir "$FIGURES_DIR" \
+    --conditions real_only,real_plus_sim \
+    --seeds "$MODEL_SEED" \
+    --n-splits "$N_SPLITS" \
+    --n-repeats "$N_REPEATS" \
+    --split-seed "$SPLIT_SEED" \
+    --device auto \
+    --calibration platt \
+    --append
+
+
+# ==========================================================================
+# Step 5 — TCN and GRU
+# ==========================================================================
+
+echo ""
+echo "============================================================"
+echo " 5. Deep Models — TCN + GRU"
+echo "============================================================"
+
 DEEP_DEVICE="${DEEP_DEVICE:-auto}"
+
 if [ "$DEEP_DEVICE" = "auto" ]; then
-  if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-    DEEP_DEVICE="cuda"
-  else
-    DEEP_DEVICE="cpu"
-  fi
+
+    if python -c \
+        "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" \
+        2>/dev/null
+    then
+        DEEP_DEVICE="cuda"
+    else
+        DEEP_DEVICE="cpu"
+    fi
+
 fi
 
-DEEP_EXTRA_ARGS=""
-if [ "$DEEP_DEVICE" = "cpu" ]; then
-  DEEP_EXTRA_ARGS="--no-amp"
-fi
+echo "[M4] Deep-model device: $DEEP_DEVICE"
 
-if [ -d "$CACHE_DIR" ] && [ -n "$(ls -A "$CACHE_DIR"/*.npz 2>/dev/null)" ]; then
-  python -m tools.train_deep_models \
-      --cache "$CACHE_DIR" \
-      --models tcn,gru \
-      --conditions real_only,real_plus_sim \
-      --seeds 42 \
-      --n-splits 3 \
-      --n-repeats 1 \
-      --device "$DEEP_DEVICE" \
-      --out-results "$RESULTS_DIR/results.csv" \
-      --outputs-dir "$RESULTS_DIR/model_outputs" \
-      --checkpoint-root checkpoints \
-      ${DEEP_EXTRA_ARGS}
-  echo "[M4] Deep model training complete; probabilities written to $RESULTS_DIR/model_outputs"
+# Frozen final configuration:
+#
+# FP16 AMP -> non-finite GRU probabilities
+# BF16 AMP -> non-finite GRU probabilities
+#
+# Therefore final reproducible training uses FP32.
+DEEP_EXTRA_ARGS="--no-amp"
+
+
+python -m tools.train_deep_models \
+    --cache "$CACHE_DIR" \
+    --models tcn,gru \
+    --conditions real_only,real_plus_sim \
+    --seeds "$MODEL_SEED" \
+    --n-splits "$N_SPLITS" \
+    --n-repeats "$N_REPEATS" \
+    --split-seed "$SPLIT_SEED" \
+    --batch-size "$BATCH_SIZE" \
+    --max-epochs "$MAX_EPOCHS" \
+    --patience "$PATIENCE" \
+    --num-workers "$NUM_WORKERS" \
+    --lr "$LEARNING_RATE" \
+    --device "$DEEP_DEVICE" \
+    --out-results "$RESULTS_DIR/results.csv" \
+    --outputs-dir "$OUTPUTS_DIR" \
+    --checkpoint-root "$CHECKPOINT_DIR" \
+    $DEEP_EXTRA_ARGS
+
+echo "[M4] Deep-model training complete."
+
+
+# ==========================================================================
+# Step 6 — Frozen threshold + ONE test evaluation
+# ==========================================================================
+
+echo ""
+echo "============================================================"
+echo " 6. Frozen Operating Point + Test Evaluation"
+echo "============================================================"
+
+# IMPORTANT:
+#
+# Threshold selection is performed using validation Normal-operation
+# instances only.
+#
+# The selected threshold, smoothing window and minimum-duration policy are
+# then frozen and applied unchanged to the corresponding unseen test fold.
+#
+# FAR numerator and denominator both use the same strictly-Normal
+# population.
+
+if compgen -G "$OUTPUTS_DIR/*_val.npz" > /dev/null; then
+
+    python -m src.eval.evaluate_predictions \
+        --outputs-dir "$OUTPUTS_DIR" \
+        --out-results "$RESULTS_DIR/results.csv" \
+        --figures-dir "$FIGURES_DIR" \
+        --smooth-window "$SMOOTH_WINDOW" \
+        --min-duration "$MIN_DURATION" \
+        --target-far "$TARGET_FAR"
+
 else
-  echo "[M4] SKIPPED: no cache at $CACHE_DIR -- run step 2 first."
+
+    echo "[ERROR] No validation prediction files found in $OUTPUTS_DIR"
+    exit 1
+
 fi
 
-# ------------------------------------------------------------------
-# Step 6: Threshold Selection & Test Evaluation (M5)
-# ------------------------------------------------------------------
-echo ""
-echo "==========================================="
-echo " 6. Threshold Selection & Test Evaluation (M5)"
-echo "==========================================="
-# This step runs AFTER models have produced results/model_outputs/*.npz.
-# Thresholds are selected on VALIDATION folds ONLY (contract §0.3),
-# then applied UNCHANGED to test folds — the S3 FREEZE point.
-if [ -d "$RESULTS_DIR/model_outputs" ] && [ -n "$(ls -A "$RESULTS_DIR/model_outputs"/*_val.npz 2>/dev/null)" ]; then
-  python -m src.eval.evaluate_predictions \
-      --outputs-dir "$RESULTS_DIR/model_outputs" \
-      --out-results "$RESULTS_DIR/results.csv" \
-      --figures-dir "$FIGURES_DIR" \
-      --smooth-window 5 \
-      --min-duration 0.0 \
-      --target-far 0.01
 
-  echo "[M5] Generating LaTeX summary tables..."
-  python -c "
-from src.eval.aggregate import load_results, summarize_folds, generate_all_tables
-import os
-results_path = '$RESULTS_DIR/results.csv'
-if os.path.exists(results_path):
-    df = load_results(results_path)
-    summary = summarize_folds(df)
-    summary.to_csv('$RESULTS_DIR/summary.csv', index=False)
-    generate_all_tables(results_path, '$TABLES_DIR/')
-    print('[M5] LaTeX tables written to $TABLES_DIR/')
-"
-else
-  echo "[M5] No model output files in $RESULTS_DIR/model_outputs yet. Skipping evaluation."
-fi
+# ==========================================================================
+# Step 7 — Aggregate final results
+# ==========================================================================
 
-# ------------------------------------------------------------------
-# Step 7: Summary & Status
-# ------------------------------------------------------------------
 echo ""
-echo "==========================================="
-echo " 7. Pipeline Summary"
-echo "==========================================="
-echo " Expected outputs (once full GPU runs complete):"
-echo "   $RESULTS_DIR/results.csv     — per-fold raw metrics"
-echo "   $RESULTS_DIR/summary.csv     — mean ± std aggregation"
-echo "   $TABLES_DIR/*.tex            — LaTeX tables for report"
-echo "   $FIGURES_DIR/*.png           — all paper figures"
+echo "============================================================"
+echo " 7. Aggregating Final Results"
+echo "============================================================"
+
+python - <<'PY'
+from src.eval.aggregate import (
+    generate_all_tables,
+    load_results,
+    summarize_folds,
+)
+
+results_path = "results/results.csv"
+summary_path = "results/summary.csv"
+tables_dir = "results/tables"
+
+df = load_results(results_path)
+
+summary = summarize_folds(df)
+summary.to_csv(summary_path, index=False)
+
+generate_all_tables(
+    results_path,
+    tables_dir,
+)
+
+print()
+print("Final summary:")
+print(summary.to_string(index=False))
+
+print()
+print(f"Summary written to: {summary_path}")
+print(f"Tables written to : {tables_dir}")
+PY
+
+
+# ==========================================================================
+# Complete
+# ==========================================================================
+
 echo ""
-echo " Pipeline Complete!"
-echo "==========================================="
+echo "============================================================"
+echo " Pipeline Complete"
+echo "============================================================"
+echo ""
+echo "Final outputs:"
+echo "  $RESULTS_DIR/results.csv"
+echo "  $RESULTS_DIR/summary.csv"
+echo "  $RESULTS_DIR/fold_report.csv"
+echo "  $RESULTS_DIR/tables/"
+echo "  $OUTPUTS_DIR/"
+echo "  $FIGURES_DIR/"
+echo ""
+echo "============================================================"
