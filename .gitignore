@@ -6,8 +6,11 @@
 data/*
 !data/download_data.sh
 
-results/*
-!results/.gitkeep
+# Final reproducibility outputs are committed.
+# Ignore only temporary/intermediate result artifacts.
+results/gpu_smoke_*/
+results/cpu_xgb_partial_backup/
+results/tmp*/
 
 checkpoints/
 *.pt
@@ -24,3 +27,5 @@ __pycache__/
 venv/
 env/
 .vscode/
+# Final server backup archive
+final_project_outputs.tar.gz
