@@ -29,3 +29,6 @@ env/
 .vscode/
 # Final server backup archive
 final_project_outputs.tar.gz
+
+cache.tar.gz
+final_repo.bundle
