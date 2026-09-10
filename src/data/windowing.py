@@ -229,7 +229,7 @@ class VariableSelector:
             )
         out = df[kept].copy()
         for col in kept:
-            v = out[col].to_numpy(dtype="float64")
+            v = out[col].to_numpy(dtype="float64", copy=True)
             v[frozen_run_mask(v, self.frozen_run_seconds)] = np.nan
             out[col] = v
         for label_col in LABEL_COLUMNS:
