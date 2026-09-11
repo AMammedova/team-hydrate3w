@@ -1,36 +1,9 @@
-"""Member 3, W3.4 — probability calibration, fit on VALIDATION folds only.
+"""Probability calibration. Fit on VALIDATION, applied unchanged to that
+fold's test wells (TEAM_5_MEMBERS.md 9.3).
 
-Feeds src/eval/metrics.py's expected_calibration_error() and
-src/eval/plots.py's plot_reliability_diagram(), and produces the before/after
-probability arrays that figure needs.
-
-WHY CALIBRATION IS NOT COSMETIC HERE
-------------------------------------
-Module 8 picks the alarm threshold by sweeping a probability and counting
-false-alarm onsets until the 1-per-100-h budget is spent. That sweep is over
-a PROBABILITY axis, so if the model's 0.7 does not mean 0.7, the threshold
-chosen on validation transfers to test as an arbitrary number. The
-XGBoostBaseline is trained with inverse-frequency sample weights on a ~3%
-positive rate, which pushes scores away from the base rate by construction --
-so its raw output is expected to be miscalibrated, not incidentally so.
-
-RED LINE (TEAM_5_MEMBERS.md §9.3)
----------------------------------
-The calibrator is fit on the VALIDATION fold and applied unchanged to that
-fold's test wells. Fitting on train would calibrate against the model's own
-training fit -- which is close to interpolated, so the mapping would be
-learned from probabilities the model never produces out of sample. Fitting on
-test is the automatic-zero version.
-
-CHOICE OF METHOD
-----------------
-"platt" (default) is a 2-parameter logistic fit. "isotonic" is
-non-parametric: strictly more flexible, and on a validation fold that
-contains a handful of positive EVENTS it will happily fit a step function to
-noise. With this dataset's fold sizes that risk is real, so the default is
-the low-variance option and "auto" exists to make the choice measurable
-rather than assumed -- it scores both by cross-validated ECE INSIDE the
-validation fold and refits the winner.
+Module 8 picks the threshold by sweeping a probability axis, so probabilities
+must mean what they say; weighted training on a ~3% positive rate makes them
+miscalibrated by construction.
 """
 
 from __future__ import annotations
@@ -43,11 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class Calibrator:
-    """A fitted probability calibrator with a uniform .predict() interface.
-
-    Wrapping both methods in one class means callers -- and the reliability
-    figure -- never branch on which one was chosen.
-    """
+    """Uniform .predict() so callers never branch on the method."""
 
     def __init__(self, method: str, model, *, degenerate: bool = False, constant: float = 0.0):
         self.method = method
@@ -58,10 +27,8 @@ class Calibrator:
     def predict(self, y_prob: np.ndarray) -> np.ndarray:
         p = np.clip(np.asarray(y_prob, dtype=np.float64), 0.0, 1.0)
         if self.degenerate:
-            # Validation saw a single class: there is nothing to learn, so the
-            # honest mapping is the identity. Returning the observed base rate
-            # instead would erase the model's ranking, and ranking is what
-            # threshold selection consumes.
+            # Validation saw one class. Identity, not the base rate: collapsing
+            # to a constant would erase the ranking threshold selection needs.
             return p
         if self.method == "isotonic":
             return np.clip(self._model.predict(p), 0.0, 1.0)
@@ -102,24 +69,10 @@ def fit_calibrator(
     n_cv: int = 5,
     random_state: int = 42,
 ) -> Calibrator:
-    """Fit a calibrator on validation-fold positive-score probabilities.
+    """y_val_true must be BINARY -- pass (y != 0), not the 3-class label.
 
-    Parameters
-    ----------
-    y_val_true
-        Binary labels (1 = Transient or Established, 0 = Normal), shape (N,).
-        Pass (y != 0) -- not the 3-class label.
-    y_val_prob
-        positive_score() output for the same rows, shape (N,), in [0, 1].
-    method
-        "platt" (default), "isotonic", or "auto" to pick between them by
-        cross-validated ECE computed inside the validation fold.
-
-    Returns
-    -------
-    Calibrator
-        Has .predict(y_prob) -> calibrated probabilities, and .method saying
-        what was actually fitted.
+    Platt by default: a validation fold holds a handful of positive events,
+    where isotonic fits a step function to noise. "auto" picks by CV ECE.
     """
     y_true = np.asarray(y_val_true)
     y_prob = np.asarray(y_val_prob, dtype=np.float64)
@@ -131,8 +84,7 @@ def fit_calibrator(
         )
     if y_true.ndim == 1 and set(np.unique(y_true)) - {0, 1}:
         raise ValueError(
-            "y_val_true must be BINARY (0/1). Pass (y != 0), not the 3-class label -- "
-            "calibrating against class ids would fit the mapping to the wrong target."
+            "y_val_true must be BINARY (0/1). Pass (y != 0), not the 3-class label."
         )
     y_true = y_true.astype(np.int64)
 
@@ -147,7 +99,6 @@ def fit_calibrator(
     if method != "auto":
         return _fit_one(method, y_true, y_prob)
 
-    # --- "auto": score both by cross-validated ECE inside validation -------
     from sklearn.model_selection import StratifiedKFold
 
     from src.eval.metrics import expected_calibration_error
@@ -175,7 +126,7 @@ def fit_calibrator(
     means = {k: float(np.mean(v)) for k, v in scores.items() if v}
     if not means:
         return _fit_one("platt", y_true, y_prob)
-    winner = min(means, key=means.get)          # lower ECE is better
+    winner = min(means, key=means.get)
     logger.info("calibrator auto-selection by CV ECE: %s -> %s", means, winner)
     return _fit_one(winner, y_true, y_prob)
 
@@ -186,13 +137,8 @@ def calibration_report(
     y_prob_after: np.ndarray,
     n_bins: int = 10,
 ) -> dict:
-    """Before/after calibration metrics for the report and the figure caption.
-
-    Brier is included alongside ECE because ECE alone can be gamed: a model
-    that predicts the base rate for every row has near-zero ECE and zero
-    discriminative value. Brier moves only if the probabilities are both
-    calibrated and informative.
-    """
+    """Before/after ECE and Brier. Brier too, because predicting the base
+    rate everywhere gives near-zero ECE and zero discriminative value."""
     from src.eval.metrics import expected_calibration_error
 
     y_true = np.asarray(y_true).astype(np.int64)
