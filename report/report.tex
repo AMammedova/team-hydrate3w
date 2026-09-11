@@ -77,19 +77,64 @@ temporal convolutional network, gated recurrent unit, 3W dataset
 \section{Introduction}
 \label{sec:introduction}
 
-% TODO (M1): Write the Introduction section. Should cover:
-% - Motivation: hydrate formation in offshore wells, safety & economic impact
-% - The 3W Dataset as a benchmark for early warning in O&G
-% - Brief summary of Event 9 (hydrate in service line)
-% - Research question: can DL models provide earlier warning than classical baselines?
-% - Paper structure overview (one sentence per section)
+% Written by M1. Every measured number quoted here is reproduced in
+% Section~\ref{sec:dataset} with its source; none is hand-typed.
 
-\placeholder{M1 writes Introduction: motivation, 3W dataset context, research
-question, paper structure. Include: 57 real Event-9 instances, only 14 with
-transient phase, only 3 reaching blockage. Emphasize that this makes the
-problem harder, not easier — and that the headline metric uses transient
-onset (Variant A from DATA\_FINDINGS.md §7).}
+Hydrate formation in offshore well service lines is a slow-onset failure
+mode. Gas hydrates crystallise inside flowlines under the combination of
+pressure, temperature and water/gas content that offshore production
+routinely produces, and a fully formed blockage can shut a well in for days.
+The process is not instantaneous: it passes through a detectable transient
+phase before the blockage establishes, which is what makes early warning a
+meaningful goal rather than a post-hoc diagnosis. If a model recognises the
+transient signature in the multivariate sensor stream early enough, an
+operator gains lead time to intervene --- chemical injection, pigging, or a
+rate change --- before the line is lost.
 
+This paper builds and evaluates an early-warning classifier for hydrate
+formation using Petrobras's 3W Dataset~2.0.0, event~9 (``Hydrate in
+Production Line''), the largest public labelled collection of real and
+simulated offshore well instrumentation for this class of problem. We frame
+the task as three-class classification --- Normal, Transient, Established
+--- over a sliding window of multivariate sensor readings, and we evaluate
+every model at a \emph{matched} false-alarm budget of one alarm per 100
+operating hours, so that lead time and false-alarm rate are comparable
+across architectures rather than each being reported at its own convenient
+operating point.
+
+The dataset makes the problem harder than a window-classification framing
+suggests, in two ways that shape every design decision in this paper. First,
+the positive class is genuinely rare: of the 57 real event-9 instances, only
+14 ever reach a transient phase and only 3 ever reach established blockage.
+The project statement defines lead time against blockage onset; on a
+well-grouped cross-validation that quantity is undefined in most test folds,
+so we measure lead time against the annotated \emph{transient} onset and
+report the blockage-referenced figure only as a secondary quantity with its
+$n=3$ stated (Sections~\ref{sec:dataset} and~\ref{sec:method_eval}). Second,
+the 15 wells that contribute event-9 recordings and the 9 wells that
+contribute Normal-operation recordings are disjoint, so well identity alone
+predicts the label. A model that shortcuts to ``which well is this'' can look
+strong under a naive evaluation and fail on the next well; per-instance
+normalisation and well-grouped splits are what close that shortcut.
+
+The required result is a head-to-head comparison of a feature-engineered
+gradient-boosted baseline (XGBoost) against two deep sequence models (a TCN
+and a GRU), each trained under two data conditions --- \texttt{real\_only}
+and \texttt{real\_plus\_sim} --- to quantify what the dataset's simulated
+instances actually add over sparse real positives. Self-supervised
+pretraining was defined as a stretch goal conditional on that comparison
+being complete, and was not attempted within the project timeframe; the
+decision is recorded in Section~\ref{sec:discussion}.
+
+The remainder of the paper is organised as follows.
+Section~\ref{sec:dataset} characterises the data with measured numbers and
+derives the windowing, channel selection and normalisation decisions from
+them. Section~\ref{sec:related_work} reviews related work.
+Section~\ref{sec:method} describes the baseline features, the two
+architectures and the evaluation protocol.
+Section~\ref{sec:experimental_setup} gives the grouped cross-validation
+design. Section~\ref{sec:results} reports the results and
+Section~\ref{sec:discussion} states what 14 events can and cannot support.
 
 % ====================================================================
 % II. DATASET — M1 writes
@@ -97,24 +142,265 @@ onset (Variant A from DATA\_FINDINGS.md §7).}
 \section{Dataset}
 \label{sec:dataset}
 
-% TODO (M1): Write the Dataset section. Must include all numbers from
-% DATA_FINDINGS.md and TEAM_5_MEMBERS.md §2:
+% Written by M1. Every number below is measured, not quoted from the
+% dataset documentation, and is reproducible by:
+%   python -m src.data.inventory --root data/3W/dataset --event 9
+%   python -m tools.m1_dataset_figures --root data/3W/dataset
+%   python -m tools.m1_sensitivity_sweep --root data/3W/dataset
+% Sources: DATA_FINDINGS.md, results/variable_availability.csv,
+% results/channel_tradeoff.csv, results/m1_sensitivity_sweep.csv.
 
-\placeholder{M1 writes Dataset section. Required content:}
+We use Petrobras's 3W Dataset~2.0.0, event~9 (``Hydrate in Production
+Line''), released under CC~BY~4.0. The event-9 folder contains 57 real
+instances, 150 simulated instances and 594 Normal-operation instances;
+we verified these counts against the dataset's own documentation rather
+than assuming them. Each instance is a full-duration, 1\,Hz multivariate
+recording of one well, annotated per timestep with a severity class.
 
-\begin{itemize}
-    \item 3W Dataset 2.0.0 overview: 57 real Event-9, 150 simulated, 594 normal
-    \item Median 32,135 timesteps per instance (floor justification, §2.2)
-    \item Monotonicity: \texttt{is\_monotonic\_severity()} = 57/57 True
-          (free methodological point)
-    \item Missingness: NaN labels in 57/57 instances (median 11.2\%, max 50.4\%)
-    \item Frozen sensors: 3 instances with dead P-TPT/T-TPT
-    \item Channel selection trade-off table (5-channel set chosen)
-    \item Well disjointness: hydrate wells $\cap$ normal wells $= \emptyset$
-    \item Per-well normalization is mandatory (not cosmetic)
-    \item Decimation: 1 Hz $\to$ 1/30 Hz, window = 60 samples = 30 min
-\end{itemize}
+\subsection{Instance length}
+Measured over the 57 real event-9 instances, an instance runs
+\textbf{32{,}135} timesteps at the median (min 7{,}144, max 192{,}581);
+55 of 57 individually exceed 10{,}000 timesteps. Simulated instances are
+longer and far more uniform (median 45{,}599, all 150 above 10{,}000), and
+Normal-operation instances have the widest spread (median 21{,}474, min
+10{,}610, max 143{,}231). The median real length is what justifies treating
+each instance as a sequence long enough to draw many windows from, and it is
+the figure the windowing floor in Section~\ref{sec:dataset_windowing} is set
+against.
 
+\subsection{The positive class is rare}
+\label{sec:dataset_rare}
+Of the 57 real event-9 instances, only \textbf{14} ever contain a
+transient-phase label and only \textbf{3} ever reach the established-blockage
+label; the remaining 43 contain only normal and unlabelled observations.
+This single fact drives the paper's headline metric. The project statement
+defines lead time against blockage onset, but an $n=3$ quantity is undefined
+on most well-grouped test folds (Section~\ref{sec:setup_nfolds}), so we take
+\texttt{failure\_time} to be the annotated \emph{transient} onset --- 14
+events across 7 wells --- and cache the blockage onset alongside it so the
+original definition can still be reported as a secondary row with its $n$
+stated.
+
+Fig.~\ref{fig:transient_duration} shows the distribution of transient-phase
+durations over those 14 events: median 3.4\,h, from 3\,min to 13.7\,h. The
+30-minute window the models see is marked for scale, and the comparison is
+the reason the window span was changed from the 60\,s originally planned
+(Section~\ref{sec:dataset_windowing}).
+Fig.~\ref{fig:annotated_trace} shows one full instance with its Normal,
+Transient and Established zones shaded; the pressure ramp in
+\texttt{P-JUS-CKGL} and \texttt{P-ANULAR} and the temperature rise in
+\texttt{T-TPT} are visible well before the blockage is annotated, which is
+the signal the models are asked to find.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{transient_duration_hist.png}
+    \caption{Transient-phase duration for the 14 real event-9 instances that
+    reach a transient phase (median 3.4\,h). The models observe a 30-minute
+    window, marked for scale.}
+    \label{fig:transient_duration}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{annotated_trace.png}
+    \caption{One real event-9 instance (\texttt{WELL-00042\_20141218051903})
+    with its Normal, Transient and Established zones shaded. The pressure and
+    temperature signatures precede the annotated blockage.}
+    \label{fig:annotated_trace}
+\end{figure}
+
+\subsection{Label monotonicity and unlabelled spans}
+\texttt{is\_monotonic\_severity()}, run over every real event-9 instance,
+returns \textbf{True for 57/57}: no instance's severity ever reverts from
+Established to Transient, or from Transient to Normal. This is a decidable
+property of the data rather than a modelling assumption, and it settles a
+design question at no cost. Labelling a window by the most severe state it
+contains and labelling it by its final timestep are mathematically identical
+whenever severity is non-decreasing, so the choice between the two cannot
+change any result here; the sweep in Section~\ref{sec:dataset_sensitivity}
+confirms this empirically as well.
+
+Every one of the 57 real instances also carries unlabelled (NaN) spans in the
+raw class column --- a median of 11.2\,\% of samples, up to 50.4\,\% in the
+worst instance. The project statement defines no policy for them. We drop any
+window whose label span touches an unlabelled sample, on the conservative
+reading that an unlabelled span is not evidence of normal operation: counting
+it as Normal would pad the false-alarm denominator with time nobody vouched
+for. Section~\ref{sec:dataset_sensitivity} prices that choice exactly.
+
+\subsection{Sensor availability: missing and frozen are different failures}
+\label{sec:dataset_availability}
+Table~\ref{tab:availability} reports both failure modes per variable over the
+57 real instances, length-weighted. A frozen run --- at least 60 identical
+consecutive 1\,Hz readings --- is counted separately from a NaN, because a
+stuck sensor is not a gap: it reports a plausible number that no imputation
+routine flags. The two are disjoint by construction, since a NaN breaks a run
+rather than extending it, so they sum to an effective unavailability.
+
+\begin{table}[t]
+    \centering
+    \caption{Variable availability over the 57 real event-9 instances,
+    length-weighted. ``Frozen'' is a run of $\geq 60$ identical consecutive
+    readings. Channels are kept when effective unavailability is below
+    50\,\%.}
+    \label{tab:availability}
+    \footnotesize
+    \begin{tabular}{lrrrc}
+        \toprule
+        Variable & Missing\,\% & Frozen\,\% & Effective\,\% & Kept \\
+        \midrule
+        \texttt{P-MON-CKP}  & 0.0  & 1.1  & 1.1  & yes \\
+        \texttt{P-JUS-CKGL} & 0.0  & 2.3  & 2.3  & yes \\
+        \texttt{QGL}        & 8.5  & 0.4  & 9.0  & yes \\
+        \texttt{T-TPT}      & 26.1 & 10.1 & 36.2 & yes \\
+        \texttt{T-JUS-CKP}  & 34.6 & 5.2  & 39.9 & yes \\
+        \texttt{P-ANULAR}   & 43.1 & 1.2  & 44.3 & yes \\
+        \texttt{P-TPT}      & 15.0 & 35.0 & 50.0 & yes$^{\dagger}$ \\
+        \texttt{ABER-CKP}   & 34.9 & 59.6 & 94.6 & no \\
+        19 further channels & ---  & ---  & 100.0 & no \\
+        \bottomrule
+    \end{tabular}
+
+    \footnotesize $^{\dagger}$ clears the threshold by 0.003\,\%.
+\end{table}
+
+Two observations carry into the rest of the paper. First, \texttt{P-TPT}
+clears the 50\,\% cut-off by 0.003\,\%: it is retained or discarded
+essentially by rounding, and 70\,\% of its unavailability is frozen rather
+than missing. It is also exactly the channel that is dead through three
+entire instances, one of which is one of the three blockage events. A
+criterion this close to a coin flip is not a channel-selection method, which
+is why the channel set is chosen by event coverage instead
+(Section~\ref{sec:dataset_channels}). Second, the discrete valve-state
+channels (\texttt{ESTADO-*}) are 100\,\% unavailable, split between missing
+and frozen: their presence in the schema is not presence in the data.
+
+\subsection{Choosing channels by event coverage}
+\label{sec:dataset_channels}
+Different wells instrument different sensors, and some sensors are frozen for
+the entire duration of specific instances. Selecting channels by \emph{well}
+coverage therefore measures the wrong thing. The criterion that matters is
+\emph{event} coverage, because an event lost to channel selection cannot be
+recovered downstream by any model, whereas lost Normal hours only cost
+calibration precision. Table~\ref{tab:channel_tradeoff} gives the trade-off
+measured on the built caches --- these are the counts the models actually
+train on, not estimates.
+
+\begin{table}[t]
+    \centering
+    \caption{Channel-set trade-off, measured on the built caches. The
+    physically intuitive two-channel set loses 4 of 14 transient events and
+    one of the three blockage events.}
+    \label{tab:channel_tradeoff}
+    \footnotesize
+    \begin{tabular}{lccccr}
+        \toprule
+        Channel set & Ch. & Trans. & Block. & Wells & Normal h \\
+        \midrule
+        Primary$^{\ddagger}$ & 5 & \textbf{14/14} & \textbf{3/3} & \textbf{7/7} & 1{,}937.7 \\
+        \texttt{P-TPT}, \texttt{T-TPT} & 2 & 10/14 & 2/3 & 5/7 & 2{,}885.7 \\
+        \bottomrule
+    \end{tabular}
+
+    \footnotesize $^{\ddagger}$ \texttt{P-MON-CKP}, \texttt{P-JUS-CKGL},
+    \texttt{T-TPT}, \texttt{T-JUS-CKP}, \texttt{P-ANULAR}.
+\end{table}
+
+The primary five-channel set is used for every result in this paper. Its
+1{,}937.7 Normal hours are 19$\times$ the calibration budget of one alarm per
+100\,h, which is ample, while the two-channel alternative buys 948 further
+Normal hours --- it retains WELL-00002, the single largest Normal-operation
+well --- at the cost of 4 of 14 transient events, 1 of 3 blockages and 2 of 7
+positive wells. That set is carried forward only as a sensitivity arm. The
+channel list is fitted once over all instances and frozen in the cache
+sidecar; Section~\ref{sec:setup_channels} verifies that refitting it per fold
+selects the same channels, so the global fit carries no fold information.
+
+\subsection{Disjoint well populations}
+\label{sec:dataset_disjoint}
+The 15 wells contributing event-9 recordings and the 9 wells contributing
+Normal-operation recordings share no well: hydrate wells $\cap$ normal wells
+$= \emptyset$. Well identity is consequently a perfect predictor of the
+label, and it is recoverable from the signals themselves through baseline
+pressures, sensor offsets and calibration differences. We close this shortcut
+from two directions. Every signal is normalised \emph{per instance} using
+that instance's own statistics, so absolute well-specific levels are removed
+before any model sees them --- a correctness requirement here, not a cosmetic
+preprocessing step. Section~\ref{sec:setup_grouping} closes it from the other
+side by grouping every split by well. Each simulated instance is additionally
+treated as its own pseudo-well, which is what makes it possible to exclude
+simulated data from validation and test by construction rather than by a
+downstream filter.
+
+\subsection{Windowing}
+\label{sec:dataset_windowing}
+Real transients run for hours (Section~\ref{sec:dataset_rare}), so a window
+must span a comparable timescale to contain any of the onset. We decimate the
+1\,Hz signal by a factor of 30 --- one sample per 30\,s, the mean of that
+block's observed samples --- and keep a window of 60 samples. A window
+therefore covers \textbf{30 minutes} while the tensor width stays at 60,
+which keeps the TCN's receptive field of 61 sufficient to see the whole
+window (Section~\ref{sec:method_arch}). The originally planned 60-second
+window would have shown a model roughly 0.5\,\% of a median transient.
+Windows are labelled Normal, Transient or Established by the most severe
+state present anywhere in the window, which by the monotonicity result above
+is equivalent to labelling by the final timestep. Tensors are channels-first,
+$[N, C, W]$, and every window carries a binary observation mask so that
+imputed and observed samples remain distinguishable downstream.
+
+The resulting cache holds 801 instances and 86{,}088 windows, with 48{,}882
+windows dropped by the unlabelled-span and minimum-valid-fraction rules. Of
+the windows kept, 42{,}259 come from real instances (1{,}295 Transient, 118
+Established --- a real positive rate of 3.34\,\%) and 43{,}829 from simulated
+instances (18{,}422 Transient, 21{,}139 Established). The simulated portion
+is thus 90.3\,\% positive against a real rate of 3.34\,\%, an imbalance
+inversion that Section~\ref{sec:discussion} returns to when interpreting the
+\texttt{real\_plus\_sim} condition.
+
+\subsection{Sensitivity of the cache to its discretionary choices}
+\label{sec:dataset_sensitivity}
+Three choices above are ours rather than the dataset's: the window labelling
+rule, the channel set and the unlabelled-span policy. We swept each one at a
+time around the primary configuration. Window counts are dominated by the 150
+simulated instances, which contain all three phases in nearly every instance
+and therefore hide what a configuration change costs on real data, so
+Table~\ref{tab:sensitivity} reports real-data event coverage alongside them.
+
+\begin{table}[t]
+    \centering
+    \caption{One-factor-at-a-time sweeps around the primary cache
+    configuration. Window totals are dominated by simulated instances; the
+    columns that decide anything are the real-data event counts.}
+    \label{tab:sensitivity}
+    \footnotesize
+    \begin{tabular}{lrrccc}
+        \toprule
+        Arm & Kept & Dropped & Trans. & Block. & Wells \\
+        \midrule
+        Primary & 86{,}088 & 48{,}882 & 14 & 3 & 7 \\
+        \texttt{final\_timestep} & 86{,}088 & 48{,}882 & 14 & 3 & 7 \\
+        \texttt{majority} & 86{,}088 & 48{,}882 & \textbf{12} & \textbf{2} & \textbf{6} \\
+        \texttt{P-TPT},\,\texttt{T-TPT} & 98{,}315 & 36{,}655 & 10 & 2 & 5 \\
+        NaN $\rightarrow$ Normal & 94{,}498 & 40{,}472 & 14 & 3 & 7 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Two of the three results were not predicted. First, \texttt{most\_severe} and
+\texttt{final\_timestep} are identical in every column, confirming the
+monotonicity result empirically: the choice between the default rule and the
+standard alternative cannot change any number in this paper. Second,
+\texttt{majority} labelling is \emph{not} label-neutral --- it erases whole
+events. It keeps exactly the same number of windows but loses 2 of the 14
+transient events, 1 of the 3 blockages and 1 positive well, because an event
+whose transient phase never occupies more than half of any 30-minute window
+is relabelled Normal everywhere and leaves the positive class entirely. For
+rare, slow-onset events that is a concrete argument against majority
+labelling rather than a preference. Third, the conservative unlabelled-span
+policy costs windows but no events: counting unlabelled spans as Normal adds
+8{,}410 windows (+9.8\,\%) and leaves event coverage identical at 14/3/7, so
+the price of the conservative choice is statistical power alone.
 
 % ====================================================================
 % III. RELATED WORK — M4 writes
@@ -605,7 +891,7 @@ folds): the search preferred the smallest and shallowest models offered,
 the expected outcome with roughly 1{,}400 positive windows.
 
 % Auto-generated table
-% \input{tables/pr_auc.tex}
+% \input{../results/tables/pr_auc.tex}
 
 % ---- VI-B. Deep Model Results (M4) ----
 \subsection{Deep Models: TCN and GRU}
@@ -624,9 +910,9 @@ conditions, with parameter count and training efficiency comparison.}
 \label{sec:results_comparison}
 
 % Auto-generated comparison tables from run_all.sh
-\input{tables/event_recall.tex}
-\input{tables/lead_time.tex}
-\input{tables/far.tex}
+\input{../results/tables/event_recall.tex}
+\input{../results/tables/lead_time.tex}
+\input{../results/tables/far.tex}
 
 The tables above present a head-to-head comparison of all three models across the real-only and real-plus-simulated data conditions. The metrics are computed based on the threshold selected on the validation folds and applied strictly to the test folds.
 
