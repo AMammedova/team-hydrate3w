@@ -1,44 +1,15 @@
-"""Member 3 — the XGBoost baseline runner for Result 1.
+"""XGBoost baseline runner for Result 1: XGBoost x {real_only, real_plus_sim}.
 
-Runs the guaranteed baseline matrix:
-    XGBoost x {real_only, real_plus_sim}
+Writes the same artefacts as tools/train_deep_models.py, plus calibrated
+arrays. Order: folds -> tune on TRAIN -> fit -> calibrate on VALIDATION ->
+apply frozen to test.
 
-and writes exactly the artefacts Module 8 already knows how to read, in the
-same layout tools/train_deep_models.py uses for TCN/GRU, so the head-to-head
-table is a comparison of models rather than of file formats.
+Test PROBABILITIES are always written (Module 8 needs them); test METRICS
+require --eval-test, which stays off until the S3 freeze.
 
-ORDER OF OPERATIONS (this is the part that is easy to get wrong)
-----------------------------------------------------------------
-    1. folds come from GroupedKFoldSplitter, real-only, built ONCE so both
-       conditions are paired on identical wells;
-    2. hyperparameters are searched on the TRAINING fold via grouped inner
-       CV -- never on validation, never on test;
-    3. the final model is fit on the training fold with inverse-frequency
-       sample weights computed from that fold's own class counts;
-    4. the calibrator is fit on VALIDATION;
-    5. the frozen calibrator is applied to test. Nothing selected after
-       seeing a test number (TEAM_5_MEMBERS.md §9.3, sync point S3).
-
-Test-set METRICS are not computed unless --eval-test is passed. The runner
-still writes test PROBABILITIES every time, because Module 8 needs them to
-run the alarm chain once after the S3 freeze. Saving predictions is not the
-same as looking at the score, and only the second one burns the test set.
-
-WHY FEATURES ARE EXTRACTED ONCE FOR THE WHOLE CACHE
----------------------------------------------------
-Red line 2 says the feature extractor is fit on the training fold only.
-RollingFeatureExtractor has no fit: every column is a function of ONE window
-and its mask, with no statistic pooled across rows, no scaler and no
-vocabulary. Extracting per fold would therefore produce bit-identical
-numbers at k times the cost. The absence of learned state is asserted at
-startup rather than trusted, so if anyone ever adds a fit() the run stops.
-
-Device: --device auto uses the GPU when XGBoost can actually see one and
-falls back to CPU otherwise. It never claims a GPU it did not get.
-
-Usage:
-    python -m tools.train_xgb --cache data/cache
-    python -m tools.train_xgb --cache data/cache --eval-test     # after S3
+Features are extracted once for the whole cache: RollingFeatureExtractor has
+no fit, so per-fold extraction would be bit-identical at k times the cost.
+The absence of fit() is asserted at startup.
 """
 
 from __future__ import annotations

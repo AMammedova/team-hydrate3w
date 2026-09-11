@@ -1,40 +1,8 @@
-"""Member 3, W3.5 — feature importance: which sensors and which statistics
-carry the signal.
+"""Feature importance.
 
-This is where the project earns a genuine domain paragraph rather than
-another table, so the analysis has to be defensible enough to hang a physical
-claim on.
-
-TWO IMPORTANCE MEASURES, AND WHY BOTH
--------------------------------------
-gain (`summarize_importances`)
-    XGBoost's own accounting: the average training-loss reduction across the
-    splits that used a feature. Free -- it falls out of the fitted booster --
-    but it is computed on TRAINING data and is well known to favour features
-    with many distinct values, which here means the continuous pressure
-    statistics over the coarse presence fractions. Fine for "what did the
-    trees lean on", not evidence about physics.
-
-permutation (`permutation_importance_table`)
-    Shuffle one column of the VALIDATION features, re-score, and record how
-    far validation PR-AUC falls. Measures out-of-sample contribution to the
-    metric actually reported, and inherits none of gain's cardinality bias.
-    This is the one the Discussion's physical argument should cite.
-
-Both share the "|"-separated name grammar emitted by
-RollingFeatureExtractor.feature_names(), so a row can always be traced back
-to (channel, statistic, timescale).
-
-READING THE RESULT AGAINST THE PHYSICS
---------------------------------------
-The 3W descriptor's hydrate-in-service-line mechanism is a growing
-restriction: pressure upstream of the production choke climbs while the
-temperature downstream of it falls as flow drops and Joule-Thomson cooling
-sets in. Against the main-arm channel set that predicts P-MON-CKP and
-T-JUS-CKP carrying most of the signal, with P-ANULAR -- the annulus, which
-does not see the service line -- carrying little. `channel_importance()`
-aggregates to exactly that granularity so the prediction can be checked
-instead of asserted.
+gain is computed on TRAINING data and favours high-cardinality features;
+permutation is out-of-sample against validation PR-AUC. Physical claims
+should cite permutation.
 """
 
 from __future__ import annotations
@@ -50,18 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_name(name: str) -> tuple[str, str, float]:
-    """Split a feature name into (channel, stat, scale).
-
-    Grammar is "<channel>|<stat>|scale<f>" or "<channel>|presence_frac";
-    see RollingFeatureExtractor.feature_names().
-
-    The separator is "|" for a reason. The previous convention was
-    "<channel>_<stat>_scale<f>" split on "_", which silently mis-parsed every
-    `last_diff` feature -- 3W channel names contain "-" and the stat name
-    contains "_", so a third of the rows came back with stat "last" and no
-    scale. Nothing raised; the importance table just quietly described
-    features that did not exist.
-    """
+    """Split "<channel>|<stat>|scale<f>" or "<channel>|presence_frac".
+    Splitting on "_" silently mis-parsed every `last_diff` feature."""
     parts = name.split("|")
     if len(parts) == 2 and parts[1] == PRESENCE_SUFFIX:
         return parts[0], PRESENCE_SUFFIX, float("nan")
@@ -87,26 +45,10 @@ def _decorate(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def summarize_importances(model, feature_names: list) -> pd.DataFrame:
-    """Gain importance from a fitted tree ensemble, joined to feature names.
-
-    Parameters
-    ----------
-    model
-        Fitted estimator exposing `.feature_importances_` (XGBClassifier,
-        XGBoostBaseline's wrapped model, sklearn forests). An XGBoostBaseline
-        is also accepted directly.
-    feature_names
-        MUST come from the same extractor instance that produced the training
-        matrix -- `extractor.feature_names(channels)`. Length is checked; the
-        order cannot be, so do not hand-build this list.
-
-    Returns
-    -------
-    pd.DataFrame with columns rank, feature, importance, channel, stat, scale,
-    sorted by importance descending.
-    """
+    """feature_names must come from the extractor that built the training
+    matrix. Length is checked; order cannot be, so do not hand-build it."""
     if hasattr(model, "model") and hasattr(model.model, "feature_importances_"):
-        model = model.model            # XGBoostBaseline -> wrapped XGBClassifier
+        model = model.model
     if not hasattr(model, "feature_importances_"):
         raise TypeError(
             f"{type(model).__name__} has no feature_importances_; pass a fitted "
@@ -117,8 +59,7 @@ def summarize_importances(model, feature_names: list) -> pd.DataFrame:
     if len(importances) != len(feature_names):
         raise ValueError(
             f"model has {len(importances)} importances but {len(feature_names)} feature "
-            f"names were given. These must come from the extractor that built the "
-            f"training matrix -- a mismatched list renames every row silently."
+            f"names were given -- a mismatched list renames every row silently."
         )
 
     df = pd.DataFrame({"feature": list(feature_names), "importance": importances})
@@ -136,17 +77,8 @@ def permutation_importance_table(
     random_state: int = 42,
     scoring: str = "pr_auc",
 ) -> pd.DataFrame:
-    """Out-of-sample permutation importance against validation PR-AUC.
-
-    For each column: shuffle it `n_repeats` times, re-score, and report the
-    mean DROP in the metric. A positive value means the feature was load
-    bearing; a value around zero (or negative) means the model could have
-    done without it.
-
-    X_val must be the FEATURE matrix, y_val the 3-class labels for the same
-    rows. Scoring uses positive_score() so this measures contribution to the
-    quantity the paper actually reports.
-    """
+    """X_val is the FEATURE matrix, y_val the 3-class labels. Positive
+    importance = load bearing."""
     from sklearn.metrics import average_precision_score
 
     from src.eval.metrics import positive_score
@@ -161,7 +93,7 @@ def permutation_importance_table(
     if len(np.unique(y_bin)) < 2:
         raise ValueError(
             "validation fold is single-class -- permutation importance against PR-AUC "
-            "is undefined here. Use a fold whose validation split contains positives."
+            "is undefined here."
         )
     if scoring != "pr_auc":
         raise ValueError(f"only 'pr_auc' scoring is supported, got {scoring!r}")
@@ -189,7 +121,7 @@ def permutation_importance_table(
 
     df = pd.DataFrame({
         "feature": list(feature_names),
-        "importance": drops,          # mean drop in validation PR-AUC
+        "importance": drops,
         "importance_std": stds,
     }).sort_values("importance", ascending=False)
     out = _decorate(df)
@@ -198,20 +130,9 @@ def permutation_importance_table(
 
 
 def _share(totals: pd.Series) -> pd.Series:
-    """Fraction of the total POSITIVE importance.
-
-    Permutation importances are signed: permuting an irrelevant column can
-    raise the score by chance, giving a small negative drop. Dividing by the
-    plain sum then misbehaves badly -- when the positives and negatives
-    nearly cancel, the denominator approaches zero and "shares" come out
-    negative or above 1. That is exactly what happens on a fold with no
-    measurable signal, which is precisely the fold where a reader most needs
-    the table not to look authoritative.
-
-    So shares are computed over the positive part only, and are NaN when
-    nothing has positive importance -- an honest "no attribution available"
-    rather than a fabricated ranking.
-    """
+    """Fraction of total POSITIVE importance. Permutation values are signed,
+    and a near-zero sum produces shares that are negative or above 1 -- exactly
+    on no-signal folds. NaN means no attribution available."""
     pos = totals.clip(lower=0.0)
     denom = pos.sum()
     if not np.isfinite(denom) or denom <= 0:
@@ -220,12 +141,7 @@ def _share(totals: pd.Series) -> pd.Series:
 
 
 def channel_importance(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse a feature-level table to one row per physical sensor.
-
-    This is the granularity the physical argument is made at -- "the model
-    leans on the pressure upstream of the choke" is a claim about a sensor,
-    not about `P-MON-CKP|slope|scale0.5`.
-    """
+    """One row per physical sensor."""
     agg = (
         df.groupby("channel")["importance"]
         .agg(total="sum", mean="mean", max="max", n_features="size")
@@ -238,27 +154,19 @@ def channel_importance(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def stat_importance(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse to one row per statistic (mean/std/.../presence_frac).
-
-    Answers "is the model reading levels or reading trends?" -- if `slope`
-    and `last_diff` outrank `mean`, the baseline is using the shape of the
-    ramp rather than the absolute sensor level, which is the behaviour
-    per-instance normalisation was introduced to force.
-    """
+    """One row per statistic."""
     agg = (
         df.groupby("stat")["importance"]
         .agg(total="sum", mean="mean", n_features="size")
         .sort_values("total", ascending=False)
         .reset_index()
     )
-    total = agg["total"].sum()
-    agg["share"] = agg["total"] / total if total else np.nan
+    agg["share"] = _share(agg["total"])
     return agg
 
 
 def scale_importance(df: pd.DataFrame) -> pd.DataFrame:
-    """Collapse to one row per timescale -- the evidence for or against the
-    multi-timescale design in the feature ablation."""
+    """One row per timescale."""
     agg = (
         df.dropna(subset=["scale"])
         .groupby("scale")["importance"]
@@ -266,6 +174,5 @@ def scale_importance(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values("total", ascending=False)
         .reset_index()
     )
-    total = agg["total"].sum()
-    agg["share"] = agg["total"] / total if total else np.nan
+    agg["share"] = _share(agg["total"])
     return agg

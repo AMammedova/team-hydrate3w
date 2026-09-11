@@ -1,39 +1,15 @@
-"""Member 3 — does sensor AVAILABILITY alone predict the label?
+"""Does sensor AVAILABILITY alone predict the label?
 
-WHY THIS PROBE EXISTS
----------------------
-Two independent results pointed the same way and needed a decisive test:
+The ablation found the presence-fraction block to be the only component with
+consistent supporting evidence, and gain importance put 40.8% of total gain on
+those 5 columns out of 95.
 
-  * the feature ablation found the per-channel presence-fraction block was
-    the only component with consistent supporting evidence (+0.066 validation
-    PR-AUC, 7/10 paired wins);
-  * gain importance on the one fold with real validation signal put 40.8% of
-    the total gain on those 5 columns, out of 95.
+Missingness is well-specific and the hydrate and Normal well populations are
+disjoint, so "which sensors exist" can proxy well identity, which nearly
+determines the label. Per-instance normalisation cannot remove this: it lives
+in the mask.
 
-DATA_FINDINGS.md §8 records that missingness in this dataset is
-well-specific: different wells instrument different sensors, and some
-sensors are dead for an entire instance. If the model can read which
-channels exist, it can partly identify the well -- and because the hydrate
-wells and the Normal-operation wells are DISJOINT populations (§2), well
-identity is very close to the label.
-
-Per-instance normalisation does not defend against this. It removes each
-recording's offset and scale; it cannot remove "this channel is absent",
-which is carried by the mask itself.
-
-So this probe trains on presence features ONLY -- no sensor values at all --
-and reports validation PR-AUC. A model that cannot see a single pressure or
-temperature reading should be unable to detect a hydrate. If it scores well
-above the base rate, the shortcut is real and the headline numbers are
-partly measuring instrumentation rather than physics.
-
-Three arms, same folds, same seeds:
-    presence_only   the 5 presence-fraction columns
-    values_only     the 90 statistic columns, presence block removed
-    all_features    the full 95-column matrix
-
-Usage:
-    python -m tools.probe_presence_shortcut --cache data/cache
+Arms: presence_only (5 cols), values_only (90), all_features (95).
 """
 
 from __future__ import annotations

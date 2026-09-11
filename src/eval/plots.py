@@ -238,25 +238,14 @@ def plot_reliability_diagram(
     n_bins: int = 10,
     title: str = "Reliability diagram - XGBoost baseline",
 ) -> None:
-    """Before/after calibration reliability diagram, with the bin counts that
-    make it readable. M3-owned; consumes src/baselines/calibrate.py's output.
+    """Before/after calibration reliability diagram with per-bin counts.
 
-    WHY THE SECOND PANEL EXISTS
-    ---------------------------
-    The positive rate on this task is about 3%, so almost every window scores
-    low and the high-probability bins can hold a handful of rows out of tens
-    of thousands. A bare reliability curve draws those bins the same size as
-    a bin holding 30,000 rows, and a reader cannot tell a real miscalibration
-    from three unlucky windows. The lower panel is the per-bin count on a log
-    axis; marker area in the upper panel is scaled by the same count. Any
-    claim made from this figure has to survive looking at both.
+    The positive rate is ~3%, so high-probability bins can hold a handful of
+    rows out of tens of thousands. The lower panel is the per-bin count on a
+    log axis and marker area tracks it, so a bin of 3 cannot look like a bin
+    of 30,000.
 
-    Parameters
-    ----------
-    y_true
-        Binary ground truth (1 = Transient or Established). Pass (y != 0).
-    y_prob_before, y_prob_after
-        positive_score() before and after the fitted Calibrator.
+    y_true is binary -- pass (y != 0).
     """
     from src.eval.metrics import expected_calibration_error
 
