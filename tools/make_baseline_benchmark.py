@@ -1,47 +1,17 @@
-"""Member 3 — a physics-shaped synthetic cache for BASELINE DESIGN ABLATIONS.
+"""Synthetic cache for BASELINE DESIGN ABLATIONS ONLY -- never a reported number.
 
-WHAT THIS IS NOT
-----------------
-Not a substitute for the real 3W cache and never a source of a reported
-headline number. Every number in the paper's Results comes from
-`data/cache` built by src/data/build_cache.py from the real download.
-
-WHAT IT IS FOR
---------------
-Choosing between feature-extractor designs needs an A/B with a known ground
-truth and enough repetitions to separate a real effect from fold noise. Doing
-that on the 14 real positive instances would burn the test folds, and
 src/data/make_fake_data.py is too structureless to discriminate between
-feature designs (it plants a ramp in two random channels of pure white
-noise, so almost any feature set scores near-perfectly).
+feature designs, so this reproduces the documented pathologies of the real
+data instead: well-level offsets/gains, disjoint positive and Normal well
+populations, whole-recording dead sensors, irregular missingness with gaps,
+unlabeled spans, and AR(1) noise.
 
-So this generator reproduces the *documented pathologies* of the real data
-(DATA_FINDINGS.md) instead:
+The hydrate signature follows the 3W mechanism -- a restriction builds, so
+upstream pressure climbs and downstream temperature falls. P-ANULAR carries no
+signal, so an importance ranking that puts it on top is visibly wrong.
 
-  * well-level instrumentation offsets and gains, so absolute sensor level
-    is a confound and per-instance normalisation actually matters (§2);
-  * positive wells and Normal-Operation wells are DISJOINT (§2);
-  * whole-recording dead/frozen sensors in a subset of instances (§9) --
-    the pathology the missing_policy ablation exists to answer;
-  * irregular missingness plus contiguous dropout gaps (§5) -- what the
-    slope_time ablation is about;
-  * unlabeled (NaN class) spans, so nan_label_policy is exercised (§5);
-  * AR(1) sensor noise rather than white noise, so trend features are not
-    trivially separable.
-
-The hydrate signature follows the physical mechanism in the 3W descriptor:
-a restriction builds in the service line, so pressure UPSTREAM of the choke
-climbs, and the temperature downstream of it falls as flow drops and
-Joule-Thomson cooling sets in. P-ANULAR is deliberately left as a distractor
-that carries no signal, so a feature-importance ranking that puts it on top
-is visibly wrong.
-
-Instances are written through the REAL pipeline -- WindowBuilder,
-mask_missing, normalize_instance -- so the arrays a model sees here differ
-from the real cache only in where the numbers came from.
-
-Usage:
-    python -m tools.make_baseline_benchmark --out data/benchmark --seed 0
+Instances go through the real WindowBuilder / mask_missing / normalize_instance
+path, so the arrays differ from the real cache only in where they came from.
 """
 
 from __future__ import annotations
