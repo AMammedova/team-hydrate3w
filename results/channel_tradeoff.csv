@@ -1,0 +1,9 @@
+n_channels,transient_events,blockage_events,positive_wells,normal_hours,channels
+1,14,3,7,1422.3,['P-MON-CKP']
+2,14,3,7,1462.0,"['P-MON-CKP', 'P-JUS-CKGL']"
+3,14,3,7,1379.3,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT']"
+4,14,3,7,1407.8,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT', 'T-JUS-CKP']"
+5,14,3,7,1466.9,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT', 'T-JUS-CKP', 'P-ANULAR']"
+6,14,3,7,1412.2,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT', 'T-JUS-CKP', 'P-ANULAR', 'P-TPT']"
+7,14,3,7,1337.6,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT', 'T-JUS-CKP', 'P-ANULAR', 'P-TPT', 'ABER-CKP']"
+8,14,3,7,1119.3,"['P-MON-CKP', 'P-JUS-CKGL', 'T-TPT', 'T-JUS-CKP', 'P-ANULAR', 'P-TPT', 'ABER-CKP', 'QGL']"
