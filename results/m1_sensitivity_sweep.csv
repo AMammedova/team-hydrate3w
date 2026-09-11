@@ -1,0 +1,6 @@
+sweep,out_dir,label_rule,nan_label_policy,channels,n_instances,n_windows_total,n_windows_dropped_total,real_transient_events,real_blockage_events,real_positive_wells,real_normal_hours,n_transient_windows,n_established_windows
+primary (baseline),data/cache,most_severe,drop,"P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR",801,86088,48882,14,3,7,1937.7,19717,21257
+label_rule,data/cache_labelrule_final_timestep,final_timestep,drop,"P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR",801,86088,48882,14,3,7,1937.7,19717,21257
+label_rule,data/cache_labelrule_majority,majority,drop,"P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR",801,86088,48882,12,2,6,1937.7,19657,20343
+channel_set,data/cache_tpt,most_severe,drop,"P-TPT,T-TPT",801,98315,36655,10,2,5,2885.7,19478,21273
+nan_label_policy,data/cache_nanpolicy_normal,most_severe,normal,"P-MON-CKP,P-JUS-CKGL,T-TPT,T-JUS-CKP,P-ANULAR",801,94498,40472,14,3,7,1937.7,19725,21257
