@@ -1,0 +1,111 @@
+\documentclass[11pt,a4paper]{article}
+
+% =====================================================================
+%  Contribution Report -- Team Enigma
+%  DLE-AI-202, Cohort I 2026 -- Track 2
+%  AI Academy, Baku, Azerbaijan
+% =====================================================================
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{parskip}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{ragged2e}
+
+\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=black}
+
+% A fixed-width left-aligned column
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+
+\begin{document}
+
+% ---- Title block ----
+\begin{center}
+  {\LARGE\bfseries Contribution Report}\\[0.6em]
+  {\large Team Enigma}\\[0.3em]
+  {\normalsize Early Warning of Hydrate Formation in Offshore Well Service Lines}\\[0.2em]
+  {\normalsize 3W Dataset 2.0.0, Event~9}\\[0.2em]
+  {\normalsize DLE-AI-202, Cohort I 2026 $\cdot$ Track 2 $\cdot$ AI Academy, Baku, Azerbaijan}\\[0.2em]
+  {\small \url{https://github.com/AMammedova/team-hydrate3w} (tag \texttt{v1.0-final})}
+\end{center}
+
+\vspace{0.8em}
+\hrule
+\vspace{1em}
+
+% =====================================================================
+\section*{Member Contributions}
+% =====================================================================
+
+\begin{table}[htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabularx}{\textwidth}{@{} L{3.2cm} X L{4.4cm} L{2.2cm} @{}}
+\toprule
+\textbf{Member} & \textbf{Code \& Experiments} & \textbf{Report Sections} & \textbf{Slides} \\
+\midrule
+
+\textbf{Mammadova, Aisel}\newline(M1)
+  & \texttt{stats.py}, \texttt{availability.py}, \texttt{download.py}, annotated trace; cache sensitivity sweep
+  & Sec.~I (Introduction) \& Sec.~III (Dataset)
+  & Slides 1--3 \\
+
+\textbf{Huseynov, Shamistan}\newline(M2)
+  & \texttt{splits.py} (two-population grouped CV), \texttt{fold\_report()}, split validation tests
+  & Sec.~V (Experimental Setup)
+  & Slide 4 \\
+
+\textbf{Karimova, Rahima}\newline(M3)
+  & \texttt{features.py} (95 features), \texttt{tune.py}, \texttt{calibrate.py}, reliability plot, feature ablation
+  & Sec.~IV-A (Baseline) \& Sec.~VI-A (XGBoost)
+  & Slide 5 \\
+
+\textbf{Mammadova, Gulnur}\newline(M4)
+  & \texttt{tcn.py}, \texttt{gru.py}, \texttt{train\_loop.py}, \texttt{profile.py}; 12 A100 GPU runs
+  & Sec.~II (Related Work) \& Sec.~VI-B (Deep Models)
+  & Slides 6--7 \\
+
+\textbf{Arabova, Saida}\newline(M5)
+  & \texttt{thresholds.py}, \texttt{metrics.py}, \texttt{aggregate.py}, \texttt{plots.py}, \texttt{run\_all.sh}
+  & Abstract, Sec.~IV-C, VI-C, VII, VIII, \& report editing
+  & Slides 8--14 \\
+
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\vspace{0.5em}
+
+% =====================================================================
+\section*{Contribution Descriptions}
+% =====================================================================
+
+\noindent\textbf{Mammadova, Aisel (M1) --- Data Quality, Dataset Story \& Early Slides.}
+Aisel led the characterization of the 3W Event-9 dataset, uncovering that only 14 of the 57 real instances contain a transient phase. She implemented the sensor availability analysis (\texttt{availability.py}), dataset statistics (\texttt{stats.py}), and the annotated sensor trace figure. She authored Section~I (Introduction) and Section~III (Dataset) of the report, and prepared Slides~1--3 on problem motivation and dataset properties.
+
+\medskip
+
+\noindent\textbf{Huseynov, Shamistan (M2) --- Cross-Validation Design \& Experimental Setup.}
+Shamistan designed and implemented the two-population grouped cross-validation strategy in \texttt{splits.py}. Because hydrate wells and normal-operation wells are completely disjoint, standard splitters fail to balance both populations; his solution pairs independent grouped splits across 3 folds. He authored Section~V (Experimental Setup) of the report, implemented \texttt{fold\_report()}, and prepared Slide~4 on the validation protocol.
+
+\medskip
+
+\noindent\textbf{Karimova, Rahima (M3) --- Feature Engineering, XGBoost Baseline \& Analysis.}
+Rahima built the XGBoost pipeline: the 95-feature multi-timescale mask-aware extractor in \texttt{features.py}, grouped inner-CV tuning, Platt calibration, and feature ablation across 18 cells. She authored Section~IV-A (Feature-Engineered Baseline) and Section~VI-A (XGBoost Performance) of the report, and prepared Slide~5 on feature engineering and baseline calibration.
+
+\medskip
+
+\noindent\textbf{Mammadova, Gulnur (M4) --- Deep Architectures, GPU Training \& Deep Results.}
+Gulnur implemented the Temporal Convolutional Network (TCN) and Gated Recurrent Unit (GRU) models along with the PyTorch training infrastructure (\texttt{fit()} with early stopping on validation PR-AUC, mixed precision, and seed determinism). She executed all 12 deep model training runs on the A100 GPU, authored Section~II (Related Work) and Section~VI-B (Deep Learning Results) of the report, and prepared Slides~6--7 on deep learning architectures.
+
+\medskip
+
+\noindent\textbf{Arabova, Saida (M5) --- Evaluation Pipeline, Synthesis \& Conclusion.}
+Saida developed the evaluation framework (\texttt{thresholds.py}, \texttt{metrics.py}, \texttt{aggregate.py}, \texttt{plots.py}, \texttt{run\_all.sh}) implementing causal alarm logic at matched false-alarm budgets, event recall, and lead-time calculation. She authored the Abstract, Section~IV-C (Causal Alarm Logic), Section~VI-C (Head-to-Head Comparison), Section~VII (Discussion \& Limitations), and Section~VIII (Conclusion \& Tools), coordinated report editing and integration, and prepared Slides~8--14 covering evaluation results, operational trade-offs, and final takeaways.
+
+\end{document}

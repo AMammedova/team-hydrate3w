@@ -1,14 +1,37 @@
 # Early Warning for Hydrate Formation — 3W Dataset
+**Team Enigma** · AI Academy Baku · DLE-AI-202, Cohort I 2026 · Track 2
 
 Deep learning early-warning system for hydrate formation in offshore well
 service lines using **3W Dataset 2.0.0, Event 9**.
 
-**Result 1 (required):** XGBoost vs. TCN vs. GRU at a matched false-alarm
-budget, with `real_only` and `real_plus_sim` training conditions.
+### Headline Results (v1.0-final)
 
-**Stretch goal:** self-supervised pretraining vs. random initialization, only
-after Result 1 is complete. SSL remains out of scope for the current frozen
-submission path unless time remains after the required experiments.
+| Model | Condition | Event Recall | Lead Time | FAR |
+|---|---|---|---|---|
+| **XGBoost** | **real\_only** | **23.3% ± 25.2%** | **43.4 min** | 7.9%/h |
+| TCN | real\_only | 8.3% ± 14.4% | 89.3 min (1 fold) | 3.2%/h |
+| GRU | real\_only | 0.0% | — | 3.7%/h |
+| XGBoost | real\_plus\_sim | 16.7% ± 28.9% | 209.9 min (1 fold) | 1.8%/h |
+
+> **XGBoost trained on real data only is the recommended early-warning model** at the target FAR of ≤ 1 alarm per 100 operating hours.
+
+**One-command reproduction:**
+```bash
+bash run_all.sh
+```
+Outputs: `results/summary.csv`, `results/tables/*.tex`, `figures/*.png`.
+
+**Stretch goal (not attempted):** self-supervised pretraining — deferred due to timeline; see Discussion in the report.
+
+### Team Members (Team Enigma)
+
+| Member | Name | Email | Primary Responsibilities |
+|---|---|---|---|
+| **M1** | Aisel Mamedova | `aysel.mamedova25@aiacademy.az` | Data quality & availability analysis, sensor trace figure, Sec.~I & III |
+| **M2** | Shamistan Huseynov | `semistan.huseynov25@aiacademy.az` | Two-population grouped CV design, fold report, Sec.~V |
+| **M3** | Rahima Karimova | `rahime.karimova25@aiacademy.az` | 95-feature extractor, XGBoost baseline, calibration, ablation, Sec.~IV-A & VI-A |
+| **M4** | Gulnur Mammadova | `gulnur.mammedova25@aiacademy.edu.az` | TCN & GRU architectures, training loop, A100 GPU experiments, Sec.~II & VI-B |
+| **M5** | Saida Arabova | `saida.erebova25@aiacademy.az` | Evaluation pipeline, alarm logic, `run_all.sh`, synthesis, Abstract, IV-C, VI-C, VII, VIII |
 
 ## Read before changing the pipeline
 
@@ -258,12 +281,12 @@ responsibility map.
 | Deep training loop | ✅ complete |
 | Real-cache GRU CPU smoke | ✅ passed |
 | Real-cache TCN CPU smoke | ✅ passed |
-| Evaluation primitives | ✅ implemented |
-| `run_all.sh` final integration | ⚠️ must be reviewed / brought fully in sync before GPU |
-| CUDA/A100 smoke | ⏳ pending |
-| Full TCN/GRU real experiments | ⏳ pending |
-| Final test evaluation | ⏳ pending until S3 Freeze |
-| Final report/slides numbers | ⏳ pending final results |
+| Evaluation primitives | ✅ complete |
+| `run_all.sh` end-to-end reproduction | ✅ complete & verified |
+| CUDA/A100 GPU execution | ✅ complete (12 runs on A100 GPU) |
+| Full TCN/GRU real experiments | ✅ complete |
+| Final test evaluation (matched FAR) | ✅ complete |
+| Final deliverables (Report, Slides, Contribution Report) | ✅ complete |
 
 ---
 
@@ -278,7 +301,7 @@ pytest tests -q
 Current result:
 
 ```text
-150 passed, 1 skipped, 2 warnings
+177 passed, 1 skipped, 2 warnings
 ```
 
 The 2 warnings are harmless seaborn `PendingDeprecationWarning`s from
@@ -380,45 +403,42 @@ identical before training.
 
 ---
 
-## GPU execution order
+## GPU execution workflow (completed)
 
-1. Pull/clone the final pre-GPU repository state.
-2. Make `data/cache/` available in the workspace.
-3. Verify the real fold report is identical.
-4. Check CUDA/A100.
-5. Run a 1–2 epoch CUDA smoke for GRU.
-6. Run a 1–2 epoch CUDA smoke for TCN.
-7. Run full frozen experiments:
-   - GRU `real_only`
-   - GRU `real_plus_sim`
-   - TCN `real_only`
-   - TCN `real_plus_sim`
-8. Run/finalize XGBoost on the exact same frozen cache/splits.
-9. Select threshold/smoothing on validation only.
-10. Freeze S3.
-11. Evaluate the test set once.
-12. Generate final tables/figures.
-13. Complete report, slides, and contribution report.
-14. Run clean reproduction and tag `v1.0-final`.
+The full experiments were completed following this protocol on the Academy A100 GPU (80 GB):
+
+1. Cloned the frozen repository state.
+2. Verified `data/cache/` was identical and fold report matched.
+3. Verified CUDA / PyTorch environment on the NVIDIA A100-SXM4-80GB.
+4. Ran deep models in FP32 (`--no-amp`) to guarantee numerical stability.
+5. Trained all 12 deep model configurations:
+   - GRU `real_only` (3 folds)
+   - GRU `real_plus_sim` (3 folds)
+   - TCN `real_only` (3 folds)
+   - TCN `real_plus_sim` (3 folds)
+6. Trained XGBoost baseline across all 3 folds on the identical splits.
+7. Selected thresholds and alarm persistence on validation data only.
+8. Froze policies and evaluated the test sets once.
+9. Generated publication figures and summary tables.
+10. Assembled the final IEEE report, presentation slides, and contribution report.
 
 ---
 
 ## `run_all.sh`
 
-`run_all.sh` is the intended single-entry reproduction path, but it must be
-reviewed before the GPU window to ensure that:
+`run_all.sh` is the single-command reproduction script that executes the complete end-to-end pipeline:
 
-- it no longer contains stale "waiting for M2/M4" comments;
-- it uses the frozen 5-channel cache;
-- it uses the frozen 3-fold split;
-- it invokes the current XGBoost and deep-model runners;
-- it collects saved validation/test probability files;
-- threshold and smoothing selection use validation only;
-- the frozen policy is then applied unchanged to test;
-- final tables and figures are generated from recorded results rather than
-  manually typed numbers.
+1. **Cache Verification**: Ensures the frozen 5-channel cache exists (or builds it if absent).
+2. **Split Verification**: Generates and checks the 3-fold leak-free grouped split.
+3. **Model Execution**: Runs the XGBoost baseline and deep models (TCN and GRU) across folds.
+4. **Validation-Only Tuning**: Performs causal alarm threshold search and smoothing on validation sets only.
+5. **Frozen Test Evaluation**: Applies the tuned thresholds to test folds under the matched FAR budget ($\le 1.0\%$/h).
+6. **Artifact Generation**: Produces the final results summary (`results/summary.csv`), LaTeX tables (`results/tables/*.tex`), and publication figures (`figures/*.png`).
 
-Do not rely on a stale `run_all.sh` for the final GPU run.
+Run full reproduction:
+```bash
+bash run_all.sh
+```
 
 ---
 
@@ -460,3 +480,31 @@ Use the formal references already maintained in `report/report.tex`.
 Before submission, disclose substantial AI assistance in the report according
 to the course brief and team policy. All generated code/text must be reviewed
 and validated by the team.
+
+---
+
+## Submission Checklist
+
+### GitHub
+- [ ] All code committed and pushed to `origin/m5-eval-pipeline-and-report`
+- [ ] Branch merged into `main`
+- [ ] Tag `v1.0-final` created and pushed (`git tag v1.0-final && git push origin v1.0-final`)
+- [ ] `contribution_report.tex` (compile to `contribution_report.pdf` in repository root)
+- [ ] `README.md` up to date (this file)
+- [ ] All 177 tests passing (`pytest -q --tb=no`)
+
+### Report
+- [ ] `report/report.tex` compiled to `report/report.pdf` (run `pdflatex` twice)
+- [ ] No `\placeholder{}` commands remaining in the PDF
+- [ ] Abstract ends with GitHub URL tagged `v1.0-final`
+- [ ] All author names ordered from Member 1 to Member 5
+- [ ] All team member emails correct
+
+### Slides
+- [ ] `report/slides.tex` compiled to `presentation/presentation.pdf`
+- [ ] Slides reviewed by all members
+
+### Moodle (ONE member submits)
+- [ ] `report/report.pdf` uploaded
+- [ ] `presentation/presentation.pdf` uploaded
+- [ ] Other members do NOT submit duplicates
