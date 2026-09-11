@@ -493,8 +493,9 @@ out of 95. We tested the implication directly by training on those columns
 presence-only model reaches a mean validation PR-AUC of \textbf{0.172}
 against \textbf{0.233} for the full 95-feature model --- \textbf{74\% of the
 full performance without seeing a single pressure or temperature reading}
---- and in 2 of 9 cells it \emph{outperforms} all 90 value features (0.493
-versus 0.354, and 0.284 versus 0.259).
+--- and in 4 of 9 cells it \emph{outperforms} all 90 value features (0.493
+versus 0.354; 0.284 versus 0.259; 0.093 versus 0.021; and 0.0008 versus
+0.0006).
 
 The explanation is in the dataset. Missingness here is well-specific:
 different wells instrument different sensors, and some sensors are dead for
@@ -515,6 +516,55 @@ the restriction mechanism predicts should dominate --- ranks last with a
 mean share of $0.002$. \textbf{We therefore do not claim that the baseline
 recovered the physical hydrate signature.} Claiming otherwise would have
 required quoting one fold and ignoring the other two.
+
+\subsubsection{The operating point, not the ranking, is what costs event recall}
+\label{sec:results_frontier}
+At the pre-registered budget of one false alarm per 100 operating hours the
+baseline flags few events, and it is worth separating two possible causes:
+a threshold chosen on validation that fails to transfer, or a ranking that
+cannot separate events at any threshold.
+
+We tested the first directly by re-selecting the threshold \emph{on the test
+fold itself} --- an oracle no deployed system could use --- and recomputing
+event recall at the same budget. It changed the result in \textbf{none} of
+the six XGBoost fold~$\times$~condition cells. Threshold selection is
+therefore not the binding constraint, and neither smoothing nor a finer
+sweep can recover the missed events.
+
+The binding constraint is the budget itself. Table~\ref{tab:frontier} sweeps
+it, taking at each budget the best recall any threshold achieves on test.
+
+\begin{table}[t]
+\centering
+\caption{Best achievable event recall for the XGBoost baseline as a function
+of the false-alarm budget (mean over the three test folds). The
+pre-registered operating point sits in the flat, uninformative region of the
+curve.}
+\label{tab:frontier}
+\begin{tabular}{lcccc}
+\toprule
+False alarms per hour & 0.01 & 0.10 & 0.25 & 0.50 \\
+\midrule
+\texttt{real\_only}      & 0.167 & 0.317 & 0.917 & 0.917 \\
+\texttt{real\_plus\_sim} & 0.167 & 0.450 & 0.917 & 0.917 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Relaxing the budget from one alarm per 100~hours to one per four hours moves
+recall from $0.167$ to $\mathbf{0.917}$. The events are separable; the
+tolerance is what excludes them. The arithmetic is instance-level: at
+$0.01$ alarms per hour a test fold with 523--855 Normal hours may emit only
+5--9 false alarms across roughly 120 Normal recordings, so the 4--5 event
+recordings must rank in the top few percent of \emph{all} recordings by peak
+score.
+
+This is a deployment trade-off rather than a defect. One alarm per four
+hours is plausible for a supervised control room and implausible for an
+unattended system, and the budget was fixed before the signal strength was
+known. We therefore report the frontier alongside the single pre-registered
+point; quoting only the latter would understate what the models detect, and
+quoting only the former would hide the cost of getting there.
 
 \subsubsection{Calibration}
 Calibration behaved as intended in every fold and both conditions. Platt
