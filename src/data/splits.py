@@ -79,6 +79,8 @@ from typing import Iterator, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from src.data.fold_report_latex import fold_report_to_latex
+
 logger = logging.getLogger(__name__)
 
 # n_splits sentinel: one fold per positive well (7 folds on the real data).
@@ -1142,6 +1144,19 @@ def _cli() -> None:
         default="results/fold_report.csv",
     )
 
+    parser.add_argument(
+        "--latex",
+        default=None,
+        help="also write the booktabs version here, e.g. "
+             "report/tables/fold_report.tex (the paper \\input{}s it)",
+    )
+
+    parser.add_argument(
+        "--label",
+        default="tab:folds",
+        help="LaTeX label for --latex output",
+    )
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -1198,6 +1213,25 @@ def _cli() -> None:
     print(
         f"\nwrote {out}"
     )
+
+    if args.latex:
+        tex = Path(
+            args.latex
+        )
+        tex.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        tex.write_text(
+            fold_report_to_latex(
+                report,
+                label=args.label,
+            ),
+            encoding="utf8",
+        )
+        print(
+            f"wrote {tex}"
+        )
 
 
 if __name__ == "__main__":

@@ -17,9 +17,18 @@
 - **Strict Disjointness:** Hydrate wells (15) and Normal wells (9) have zero overlap. Per-instance normalization is mandatory to prevent models from simply memorizing well identities.
 
 ## 4. Cross-Validation & Experimental Setup (M2)
-- **Preventing Leakage:** We implemented a Grouped K-Fold cross-validation strategy, grouped by well ID.
-- **Independent Splits:** Normal wells and positive-event wells were split independently to ensure diverse representation across all folds.
-- **Simulation Protocol:** Simulated instances were exclusively restricted to training folds to prevent them from inflating test metrics.
+- **Why grouping is mandatory here:** the 15 hydrate wells and the 9 Normal wells are *disjoint* — well identity alone predicts the label, and it is recoverable from sensor offsets. Every split is by well.
+- **Two independent splits, paired fold by fold:** positive wells balanced on **events**, Normal wells balanced on **hours**. A single stratified split leaves fold composition to chance — and Normal hours range from 1,220 h (WELL-00002) to 6 h (WELL-00007).
+- **Why 3 folds, not leave-one-well-out:** LOWO puts **5 of 7** test folds below 300 Normal hours, the thinnest at **49.9 h** — a budget of 1 alarm / 100 h is not measurable there. At k=3 every test fold holds **4–5 events and 509–562 Normal hours**.
+
+| Fold | Val events | Val normal h | Test events | Test normal h |
+|---|---|---|---|---|
+| 0 | 1 | 530.7 | 5 | 509.2 |
+| 1 | 3 | 305.2 | 5 | 561.8 |
+| 2 | 5 | 509.2 | 4 | 530.7 |
+
+- **Simulation protocol:** each simulated instance is its own pseudo-well and is never eligible for validation or test — `real_only` vs `real_plus_sim` differ *only* in the training side, so the comparison is paired on wells.
+- **Frozen before test:** k=3, 1 repeat, nested validation, seed 42 — unchanged after any test number was seen.
 
 ## 5. Baseline: XGBoost & Feature Engineering (M3)
 - **Feature Extraction:** A multi-timescale rolling feature extractor operating on a 30-minute causal window (scales: 1.0, 0.5, 0.25).
@@ -47,9 +56,13 @@
 - **Per-Well Distribution:** Lead times varied significantly across the 7 real positive wells due to differing sensor configurations and noise profiles.
 
 ## 10. Discussion & Limitations (M2)
-- **Simulation Bias:** Simulated data systematically over-represents the blockage phase, which is rarely reached in reality (only 3 real instances).
-- **Small Sample Size:** The most critical limitation is having only 14 real transient instances across 7 wells, restricting the statistical power of the evaluation.
-- **Generalization Challenges:** Disjoint well populations mean that generalizing to entirely unseen wells remains difficult.
+- **The operating point does not transfer across wells.** Thresholds tuned on validation to ≤ 1 alarm / 100 h deliver **1.8–7.9 / 100 h** on test — while event recall stays at **0.00–0.23**. Too permissive for the budget *and* too strict to catch events means the alarms land on Normal data: the score scale shifts from well to well.
+- **Why that was predictable:** every validation fold contains **exactly one positive well** (Table 1). The operating point is always fitted to one well's score distribution, then applied to 1–4 unseen wells.
+- **Fold 0 cannot validate anything:** **1 positive window out of 11,260**. Early stopping, calibration and threshold selection are all fitted there; a calibrator cannot even be fitted. Fold 1 has the mirror problem on the training side — all training positives in one well, so inner CV could not tune and fell back to defaults.
+- **Small sample:** 14 transient events / 7 wells; 3 blockage instances only, so the headline metric was redefined to transient onset. Lead time is computed from **0–2 flagged events** per cell — reported, but not a performance estimate.
+- **Simulation bias:** simulated windows are **90.3% positive** vs a **3.34%** real rate and all 150 reach blockage. Mixed effect — for XGBoost, PR-AUC 0.11→0.21 and FAR 7.9→1.8, but recall 0.23→0.17. `real_only` is the headline.
+- **Our own asymmetries:** the baseline is calibrated per fold, the deep models are not — so ECE is not like-for-like. (A monotone calibrator would *not* change any alarm decision, so this does not explain the recall gap.) SSL pretraining was **not attempted within the timeframe**.
+- **We did not re-cut the folds after seeing test results** — that is the selection this protocol exists to prevent.
 
 ## 11. Conclusion & Future Work (M5)
 - **Recommendation:** [PLACEHOLDER] The [Model Name] architecture is currently recommended for early warning due to its robust lead time at the target FAR.
