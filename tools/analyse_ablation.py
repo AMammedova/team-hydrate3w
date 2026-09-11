@@ -1,30 +1,8 @@
-"""Member 3 — the analysis behind every number in the report's Results VI-A.
+"""Paired analysis of results/ablation_features.csv.
 
-Reads results/ablation_features.csv (from tools/ablate_features.py) and
-re-derives each figure quoted in report/results_xgboost.md, so no number in
-the paper is typed by hand (team contract §0.3).
-
-WHY THIS IS NOT JUST A GROUPBY: THE BASE-RATE TRAP
---------------------------------------------------
-PR-AUC is not comparable across folds whose positive base rates differ, and
-here they differ by more than two orders of magnitude -- one validation
-split contains a single positive window out of 11,260, another contains 463
-of 7,327. PR-AUC rises with the base rate on its own, so a raw comparison
-attributes to the model what is actually a property of the split.
-
-That is not hypothetical. On raw PR-AUC the number of positive validation
-events correlates strongly with score (Spearman rho = 0.638, p = 0.004),
-which invites the conclusion that sparse folds cannot measure anything. The
-correlation does not survive base-rate correction (rho = -0.14, p = 0.58).
-
-So every cross-fold comparison here is done on LIFT = PR-AUC / base_rate,
-and paired arm comparisons are done on log lift (a ratio scale, so the
-paired difference is a multiplicative factor). The raw-scale numbers are
-printed alongside, precisely so the discrepancy stays visible.
-
-Usage:
-    python -m tools.analyse_ablation
-    python -m tools.analyse_ablation --ablation results/ablation_features.csv
+Mean paired difference vs each group's reference arm, with a Wilcoxon
+signed-rank test, reported both over all cells and over the estimable subset
+(>= 2 positive validation events).
 """
 
 from __future__ import annotations

@@ -1,32 +1,11 @@
-"""Member 3 — feature-design ablation for the XGBoost baseline.
+"""Feature-design ablation for the XGBoost baseline.
 
-Answers, with numbers instead of intuition:
+Arms: missing_policy (nan vs zero), slope_time (index vs rank), number of
+timescales, presence block on/off.
 
-  A. missing_policy  -- is a dead sensor better encoded as NaN (XGBoost
-     learns a default branch direction) or as 0.0 (the legacy encoding,
-     which after per-instance normalisation reads as "this sensor is
-     sitting calmly at its baseline")?
-  B. slope_time      -- should the least-squares slope be regressed on the
-     sample's true position (gaps keep their width) or on its rank among
-     present samples (gaps silently collapse)?
-  C. scales          -- do the three timescales earn their columns?
-  D. presence        -- does the per-channel presence-fraction block help?
-
-RULES THIS OBEYS (TEAM_5_MEMBERS.md §9 red lines)
--------------------------------------------------
-* Scored on VALIDATION folds only. `test_idx` is loaded and immediately
-  discarded -- selecting a feature design on test is the automatic-zero
-  version of this experiment.
-* The feature extractor is fit-free (it has no learned state), but it is
-  still applied per fold, and the XGBoost model is fit on the training fold
-  only.
-* Every arm sees the SAME folds and the SAME seeds, so the comparison is
-  paired and the per-fold differences are meaningful. Arms are compared on
-  paired differences, not on the gap between two independent means.
-* Simulated instances never enter validation.
-
-Usage:
-    python -m tools.ablate_features --cache data/cache --out results/ablation_features.csv
+Scored on VALIDATION folds only. Every arm sees the same folds and seeds, so
+comparisons are paired. Several split seeds are used because 3 folds give only
+3 paired cells and at least one has a single positive validation event.
 """
 
 from __future__ import annotations
