@@ -127,10 +127,12 @@ Important limitation: fold 0 has only one positive validation event, so validati
 | Positive-well columns in `fold_report()` | `src/data/splits.py` | `[x]` |
 | Run real `fold_report()` | `results/fold_report.csv` | `[x]` **DONE 2026-09-08** |
 | Inspect real fold quality | real fold report | `[x]` **DONE** |
+| Table 1 generated, not hand-copied | `src/data/fold_report_latex.py`, `report/tables/fold_report.tex` | `[x]` **DONE 2026-09-11** — `--latex` flag on the splits CLI |
+| Channel-list constancy across folds | `tools/m2_channel_constancy.py` | `[x]` **DONE 2026-09-11** — all 3 folds refit to the same 7 channels, so the global fit carries no fold information; the shipped 5-channel list differs only because it was pinned for event coverage |
 | Freeze split configuration | team decision | `[x]` **freeze 3 folds / 1 repeat / nested; do not redesign after test results** |
-| Write Experimental Setup | `report/report.tex` | `[ ]` |
-| Write Discussion & Limitations | `report/report.tex` | `[ ]` |
-| Slides 4 & 10 review | `presentation/final_slides.md` | `[x]` slides exist; M2 review remains |
+| Write Experimental Setup | `report/report.tex` | `[x]` **DONE 2026-09-11** — grouping rationale, dual split, nested validation, fold-count justification incl. the LOWO trade-off |
+| Write Discussion & Limitations | `report/report.tex` | `[x]` **DONE 2026-09-11** — sample size, redefined headline metric, operating-point transfer failure, fold-0/fold-1 pathologies, sim bias, calibration asymmetry, SSL deferred |
+| Slides 4 & 10 review | `presentation/final_slides.md` | `[x]` **DONE 2026-09-11** — rewritten with the fold table and the measured findings; stale M2 TODOs cleared from `slides_outline.md` |
 
 > M2's splitter implementation and real-fold validation are complete. The principal reporting caveat is the single positive validation event in fold 0.
 

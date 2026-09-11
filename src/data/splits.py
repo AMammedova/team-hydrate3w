@@ -1,73 +1,3 @@
-"""
-Module 3 — Grouped Cross-Validation Splitter (Member 2, W2.1-W2.3).
-See DL_Project_Statement_Hydrate3W.docx, section 6 (DL3.1-DL3.3), and
-DATA_FINDINGS.md §2, which is what forced the design below.
-
-WHY THIS IS NOT A PLAIN StratifiedGroupKFold
---------------------------------------------
-Measured on the real download (DATA_FINDINGS.md §2): the hydrate wells
-and the Normal-Operation wells are DISJOINT -- no well appears in both.
-Two consequences drive everything here:
-
-  1. Well identity alone predicts the label. A model can "solve" the task
-     by recognising a well's sensor offsets. Well-level grouping is
-     therefore not a nicety, it is the only thing making the numbers mean
-     anything (per-instance normalisation in windowing.py is the other
-     half of that defence).
-  2. Running one StratifiedGroupKFold over the union of both well
-     populations leaves fold composition to chance: one fold can get 5
-     Normal wells and another 1. Normal hours are the denominator of the
-     false-alarm rate, and they are wildly unequal (WELL-00002 alone has
-     1220 h, WELL-00007 has 6 h), so an unlucky fold ends up with ~46 h
-     of Normal -- far too little to calibrate a 1-alarm-per-100-h budget.
-
-So we run TWO INDEPENDENT grouped splits and pair them fold by fold:
-
-    positive wells  --(balanced on positive EVENTS)-->  P0 P1 P2
-    normal wells    --(balanced on NORMAL HOURS)---->   N0 N1 N2
-    fold i test wells = Pi u Ni
-
-Balancing is longest-processing-time-first greedy (assign the heaviest
-remaining well to the lightest fold), which is what keeps WELL-00042
-(5 of the 14 transient instances) and WELL-00002 (36% of all Normal
-hours) from dominating a single fold.
-
-VALIDATION FOLD
----------------
-split() yields a NESTED (train_idx, val_idx, test_idx). val_idx is carved
-out of that fold's TRAINING wells only -- never its test wells -- because
-Module 7's early stopping and Module 8's threshold/smoothing selection
-both need a validation set that is not the test set.
-
-Validation carries two jobs that need different things, so
-`val_mode="nested"` (the default) picks its wells two different ways:
-
-  * EARLY STOPPING needs positive events. Sampling `val_frac` of the
-    training wells at random regularly yields zero of them across 7
-    positive wells, which leaves PR-AUC undefined -- so positive wells
-    are taken as one event-balanced slice of the training pool.
-  * THRESHOLD SELECTION needs Normal HOURS: Module 8 tunes for 1 alarm
-    per 100 h on validation. A proportional slice does not guarantee
-    them -- on the real cache it left one fold with 4.0 validation hours
-    -- so Normal wells are added smallest-first until
-    `min_val_normal_hours` is met, and no further.
-
-`val_mode="rotate"` (fold i validates on fold i+1's wells) is kept
-because it is simpler to explain, but at k=3 it spends a full third of
-the data on validation and leaves the model less training data than
-validation data -- measured on the real cache: 12.4k train vs 18.3k val
-windows. Prefer "nested" unless you have a reason not to.
-
-SIMULATED INSTANCES
--------------------
-Simulated pseudo-wells (inventory.py gives each its own singleton group)
-are excluded from the test and validation candidate pools entirely, so
-DL3.2 ("no simulated instance in a val/test fold") holds by construction
-rather than by a downstream filter. They land in train_idx only when
-`include_sim_in_train=True` -- that flag is how a caller switches between
-the `real_only` and `real_plus_sim` conditions of Result 1.
-"""
-
 from __future__ import annotations
 
 import json
@@ -78,6 +8,8 @@ from typing import Iterator, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+
+from src.data.fold_report_latex import fold_report_to_latex
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +27,6 @@ _SIM_PREFIXES = ("SIM-", "DRAWN-")
 
 @dataclass
 class CacheIndex:
-    """
-    Per-window metadata for a built cache, loaded WITHOUT touching X.
-
-    build_cache.py writes one .npz per instance holding X, mask, y, group,
-    inst_id, t_end, is_sim and the scalars failure_time / blockage_time /
-    normal_hours. Fold design needs everything except X and mask, and X is
-    the only expensive part -- so this reads just the small arrays. That
-    keeps fold_report() (Table 1 of the report) runnable on a laptop.
-    """
 
     y: np.ndarray               # (N,) window labels 0/1/2
     group: np.ndarray           # (N,) well group id
@@ -122,16 +45,7 @@ class CacheIndex:
 
 
 def _cache_files(cache_dir: str | Path) -> list[Path]:
-    """
-    THE row order of a cache, defined in exactly one place.
 
-    Every index this module hands out (train_idx/val_idx/test_idx) is an
-    offset into arrays concatenated in this order. If a caller loads X in
-    a different order, the indices still "work" -- they just point at the
-    wrong rows, silently, and every downstream number is wrong without a
-    single error being raised. So X and the metadata must come from the
-    same enumeration: load_cache() and load_cache_index() both call this.
-    """
     cache = Path(cache_dir)
     files = sorted(cache.glob("*.npz"))
     if not files:
@@ -143,18 +57,7 @@ def _cache_files(cache_dir: str | Path) -> list[Path]:
 
 
 def load_cache_index(cache_dir: str | Path) -> CacheIndex:
-    """
-    Read every `<instance>.npz` in `cache_dir` and concatenate its metadata.
 
-    `hours_by_well` sums each instance's `normal_hours` scalar (seconds
-    labeled Normal / 3600) per well; it is the denominator behind the
-    `test_normal_hours` column of fold_report().
-
-    `failure_time` and `blockage_time` are per-INSTANCE scalars on disk;
-    they are broadcast to every window of their instance here so Module 8
-    can compute a lead time by row without re-opening the cache (and
-    without re-deriving the row order -- see _cache_files).
-    """
     files = _cache_files(cache_dir)
 
     ys, groups, insts, sims, tends, fails, blocks, counts = [], [], [], [], [], [], [], []
@@ -197,24 +100,7 @@ def load_cache_index(cache_dir: str | Path) -> CacheIndex:
 
 
 def load_cache(cache_dir: str | Path) -> tuple[np.ndarray, np.ndarray, CacheIndex]:
-    """
-    Load `X`, `mask` and the matching CacheIndex in ONE guaranteed row order.
 
-        X, mask, idx = load_cache("data/cache")
-        for train_idx, val_idx, test_idx in splitter.split(
-            X, idx.y, idx.group, is_sim=idx.is_sim,
-            instances=idx.inst_id, well_hours=idx.hours_by_well,
-        ):
-            model.fit(X[train_idx], mask[train_idx], idx.y[train_idx])
-
-    Use this rather than globbing the cache yourself: fold indices are
-    positions in this concatenation, and a different enumeration order
-    misaligns every row without raising anything.
-
-    X is `[N, C, W]` float32, channels-first (contract §0.1) -- roughly
-    100 MB for the real 5-channel cache, so it fits in memory; nothing
-    here streams.
-    """
     files = _cache_files(cache_dir)
     index = load_cache_index(cache_dir)
 
@@ -266,20 +152,7 @@ def _balanced_fold_assignment(
     rng: np.random.Generator,
     tolerance: float = 0.10,
 ) -> list[list]:
-    """
-    Longest-processing-time-first greedy: heaviest well to the lightest fold.
 
-    Balancing on a weight (events, hours) rather than well COUNT is the
-    point: 7 wells split 3/2/2 by count still puts 5 of the 14 transient
-    instances in whichever fold holds WELL-00042.
-
-    Plain LPT is deterministic, so `n_repeats > 1` would re-derive the
-    same partition every time and the resulting "mean ± std" would
-    understate the variance from fold composition -- the one thing extra
-    repeats exist to measure. The fold is therefore drawn at random from
-    those within `tolerance` of the lightest load (a fraction of the mean
-    per-fold load). Tolerance 0 reduces to textbook LPT.
-    """
     wells = list(wells)
 
     if not wells:
@@ -309,15 +182,7 @@ def _val_normal_wells(
     floor: float,
     rng: np.random.Generator,
 ) -> list:
-    """
-    Pick validation Normal wells by HOURS, smallest first, until `floor` is
-    reached -- and never take the last Normal well away from training.
 
-    Smallest-first is deliberate. Taking one large well would clear the
-    floor in a single pick but hand validation most of the fold's Normal
-    windows; the small wells clear it while leaving the bulk for training,
-    and they make the validation set more diverse at the same time.
-    """
     pool = list(pool)
 
     if len(pool) <= 1:
@@ -342,51 +207,6 @@ def _val_normal_wells(
 
 
 class GroupedKFoldSplitter:
-    """
-    Well-level nested CV splitter for the 3W hydrate task.
-
-    Parameters
-    ----------
-    n_splits
-        Number of folds, or LEAVE_ONE_WELL_OUT (-1) for one fold per
-        positive well. DATA_FINDINGS.md §6 recommends 3: with 7 positive
-        wells, 5 folds leaves 1-2 positive wells per test fold and the
-        per-fold metrics stop being estimable. Decide from fold_report()
-        and justify the choice in the report.
-
-    n_repeats
-        Repeats of the whole scheme with a reshuffled assignment. Reduced
-        to 1 for the 7 Sep deadline (TEAM_5_MEMBERS.md §0).
-
-    val_mode
-        "nested" (default): validation is carved from the training pool.
-        Positive wells are selected by an event-balanced slice, while
-        Normal wells are added smallest-first until the validation
-        Normal-hours floor is met.
-
-        "rotate": fold i validates on fold (i+1)'s wells -- simpler, but
-        at k=3 it leaves the model less training data than validation data.
-
-    min_test_normal_hours
-        Fold-level sanity floor for the false-alarm denominator. A fold
-        below this cannot support a 1-per-100-h budget; the splitter warns
-        (or raises, with `strict=True`) instead of letting M5 compute a
-        threshold on too little Normal exposure.
-
-    min_val_normal_hours
-        The same floor on the VALIDATION side, where Module 8 actually
-        selects the threshold. Only used by val_mode="nested"; it is what
-        decides how many Normal wells validation borrows from training.
-
-    include_sim_in_train
-        False reproduces the `real_only` condition of Result 1; True the
-        `real_plus_sim` condition. Simulated wells are never eligible for
-        val/test either way.
-
-    strict
-        If False, fold-quality problems are logged as warnings. Leakage
-        remains a hard error. If True, fold-quality problems also raise.
-    """
 
     def __init__(
         self,
@@ -709,25 +529,6 @@ class GroupedKFoldSplitter:
         val_wells,
         train_wells,
     ) -> None:
-        """
-        Validate one fold before row indices are exposed downstream.
-
-        Hard guarantees:
-          * no well may appear on more than one split side;
-          * simulated wells may never enter validation or test.
-
-        Fold-quality checks:
-          * validation must contain at least one positive event;
-          * training should retain at least two distinct REAL positive wells;
-          * test must contain enough Normal operating hours for the target FAR.
-
-        With ``strict=False`` the fold-quality checks emit warnings so that
-        small-data limitations can be inspected and reported rather than
-        silently ignored.
-
-        With ``strict=True`` those same conditions raise ValueError and
-        prevent the fold from being used.
-        """
         test_s = set(test_wells)
         val_s = set(val_wells)
         train_s = set(train_wells)
@@ -941,36 +742,7 @@ class GroupedKFoldSplitter:
         well_hours: Mapping | None = None,
         well_names: Mapping | None = None,
     ) -> pd.DataFrame:
-        """
-        Table 1 of the report: one row per (repeat, fold).
 
-        Run this BEFORE any model training (DL3.3). It is what tells you
-        whether n_splits is sane given 14 positive instances over 7 wells.
-
-        Important columns:
-
-          n_train_positive_wells
-              Fewer than 2 means the learner sees positive behaviour from
-              only one real well in training, making unseen-well
-              generalisation poorly identified.
-
-          n_val_positive_events
-              0 means validation PR-AUC / threshold selection are undefined.
-
-          test_normal_hours
-              The false-alarm denominator. Below ~300 h, a 1-per-100-h
-              operating point is not well measurable.
-
-        `test_normal_hours` sums `normal_hours` over the test wells that
-        carry NO positive window. That is deliberately not the same set as
-        "the class-0 folder": quiet hydrate-event recordings are still
-        legitimate false-alarm denominators if all of their retained
-        windows are Normal.
-
-        Normal stretches INSIDE a positive well are excluded, which is the
-        conservative direction: it can only understate the denominator,
-        never inflate it.
-        """
         table = self._well_table(
             y,
             groups,
@@ -1142,6 +914,19 @@ def _cli() -> None:
         default="results/fold_report.csv",
     )
 
+    parser.add_argument(
+        "--latex",
+        default=None,
+        help="also write the booktabs version here, e.g. "
+             "report/tables/fold_report.tex (the paper \\input{}s it)",
+    )
+
+    parser.add_argument(
+        "--label",
+        default="tab:folds",
+        help="LaTeX label for --latex output",
+    )
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -1198,6 +983,25 @@ def _cli() -> None:
     print(
         f"\nwrote {out}"
     )
+
+    if args.latex:
+        tex = Path(
+            args.latex
+        )
+        tex.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        tex.write_text(
+            fold_report_to_latex(
+                report,
+                label=args.label,
+            ),
+            encoding="utf8",
+        )
+        print(
+            f"wrote {tex}"
+        )
 
 
 if __name__ == "__main__":
