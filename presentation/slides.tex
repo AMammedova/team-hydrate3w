@@ -336,9 +336,35 @@ DLE-AI-202, Cohort I 2026 \(\cdot\) Track 2}
 
 \begin{frame}{Lead Time vs. False Alarm Rate Trade-off}
   \begin{center}
-    \includegraphics[width=0.82\textwidth,height=0.62\textheight,keepaspectratio]{lead_time_vs_far.png}
+    \includegraphics[width=0.68\textwidth,height=0.46\textheight,keepaspectratio]{lead_time_vs_far.png}
   \end{center}
   \small Vertical dashed line = target operating point (1 alarm / 100 h). XGBoost (real\_only) is the only model that consistently achieves non-zero lead time at or near the target FAR.
+\end{frame}
+
+\begin{frame}{The Budget, Not the Ranking, Costs the Recall}
+  \begin{columns}
+    \column{0.46\textwidth}
+      \begin{table}
+        \caption{Best achievable XGBoost event recall vs.\ false-alarm budget}
+        \begin{tabular}{lcccc}
+          \toprule
+          alarms/h & 0.01 & 0.10 & 0.25 & 0.50 \\
+          \midrule
+          real\_only & 0.167 & 0.317 & \textbf{0.917} & 0.917 \\
+          real+sim   & 0.167 & 0.450 & \textbf{0.917} & 0.917 \\
+          \bottomrule
+        \end{tabular}
+      \end{table}
+    \column{0.5\textwidth}
+      \begin{alertblock}{Threshold tuning is not the problem}
+        Re-selecting the threshold \textit{on the test fold itself} --- an oracle we could never ship --- changes recall in \textbf{0 of 6} XGBoost cells.
+      \end{alertblock}
+      \begin{exampleblock}{Why 1 alarm/100\,h is so severe}
+        A test fold has 523--855 Normal hours, so the budget permits only \textbf{5--9 false alarms across $\approx$120 Normal recordings}. The 4--5 event recordings must rank in the top few percent of \textit{all} recordings.
+      \end{exampleblock}
+  \end{columns}
+  \vspace{0.3em}
+  \small Relaxing to 1 alarm/4\,h moves recall $0.167 \rightarrow \mathbf{0.917}$: a deployment trade-off, not a defect.
 \end{frame}
 
 \begin{frame}{Per-Well Lead Time Distribution}
@@ -409,7 +435,7 @@ DLE-AI-202, Cohort I 2026 \(\cdot\) Track 2}
 \begin{frame}{Conclusion \& Recommendations}
   \begin{block}{Summary}
     \begin{itemize}
-      \item XGBoost (real\_only): best recall \textbf{23.3\%}, lead time \textbf{43.4\,min}, FAR \textbf{7.9\%/h} (within budget for 2/3 folds)
+      \item XGBoost (real\_only): best recall \textbf{23.3\%}, lead time \textbf{43.4\,min}, FAR \textbf{7.9\%/h} --- no fold met the 1\%/h budget on test (2.6$\times$, 19$\times$, 2.0$\times$ over)
       \item TCN: 8.3\% recall (1 fold only), lead time 89.3\,min — promising but unreliable
       \item GRU: 0\% recall under real\_only — did not generalize
       \item Simulated data: consistently hurts all models on real test wells
@@ -418,7 +444,7 @@ DLE-AI-202, Cohort I 2026 \(\cdot\) Track 2}
   \begin{columns}
     \column{0.5\textwidth}
       \begin{exampleblock}{Recommendation for operators}
-        Deploy XGBoost (real\_only) as the current best early-warning system. Expect to miss $\approx$75\% of events --- this reflects the fundamental scarcity of real labeled data, not a fixable algorithm problem.
+        Deploy XGBoost (real\_only), but \textbf{choose the alarm budget deliberately}. At 1 alarm/100\,h it recalls 17\%; at 1 alarm/4\,h the same model recalls \textbf{92\%}. The events are detectable --- the pre-registered tolerance is what excludes them.
       \end{exampleblock}
     \column{0.48\textwidth}
       \begin{block}{Future directions}
