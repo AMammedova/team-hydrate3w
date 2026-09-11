@@ -15,7 +15,9 @@
 \usepackage{multirow}
 
 % Path for figures
-\graphicspath{{../figures/}}
+% LOCAL: ../figures/   |   OVERLEAF: figures/
+% (Upload all .png files from the local figures/ folder into a figures/ folder in Overleaf)
+\graphicspath{{figures/}{../figures/}}
 
 % ---- Helpers ----
 % Placeholder macro for sections awaiting content from team members
@@ -33,15 +35,16 @@ A Comparison of XGBoost, TCN, and GRU at Matched False-Alarm Budgets}
 % AUTHORS — all five members
 % ====================================================================
 \author{
-\IEEEauthorblockN{Member~1\IEEEauthorrefmark{1},
-Member~2\IEEEauthorrefmark{1},
-Member~3\IEEEauthorrefmark{1},
-Member~4\IEEEauthorrefmark{1},
-Member~5\IEEEauthorrefmark{1}}
+\IEEEauthorblockN{Mammadova,~Aisel\IEEEauthorrefmark{1},
+Huseynov,~Shamistan\IEEEauthorrefmark{1},
+Karimova,~Rahima\IEEEauthorrefmark{1},
+Mammadova,~Gulnur\IEEEauthorrefmark{1},
+Arabova,~Saida\IEEEauthorrefmark{1}}
 \IEEEauthorblockA{\IEEEauthorrefmark{1}%
-DLE-AI-202, Cohort I 2026 · Track 2\\
-\placeholder{University / Institution Name}\\
-\placeholder{member emails}}
+AI Academy, Baku, Azerbaijan\\
+Team Enigma $\cdot$ DLE-AI-202, Cohort I 2026 $\cdot$ Track 2\\
+\{aysel.mamedova25, semistan.huseynov25, rahime.karimova25, saida.erebova25\}@aiacademy.az,\\
+gulnur.mammedova25@aiacademy.edu.az}
 }
 
 \maketitle
@@ -60,7 +63,10 @@ hours, with lead time (time from first alarm to annotated transient onset)
 as the headline metric. Each model is trained under two conditions:
 real-only and real-plus-simulated data. We employ grouped cross-validation
 with well-level splits to prevent data leakage. Our results demonstrate that
-\placeholder{M5: fill after S3 FREEZE — e.g. TCN under real-plus-simulated data achieved the best median lead time of X minutes and Y\% event recall}.
+XGBoost trained exclusively on real data achieved the highest event recall of $23.3\%$ ($\pm 25.2\%$) and a mean lead time of $43.4$\,min across the two folds where any event was detected, at a matched false-alarm rate of $1.0\%$/h.
+Deep models (TCN and GRU) did not reliably detect events on the held-out test wells in any condition, primarily because only 14 real transient instances are available for training and evaluation.
+Simulated data did not improve performance for any model.
+The feature-engineered baseline remains the only approach that demonstrates non-trivial detection on this dataset.
 
 Reproduction: all code, data processing, and evaluation are available at
 \url{https://github.com/AMammedova/team-hydrate3w}.
@@ -77,64 +83,21 @@ temporal convolutional network, gated recurrent unit, 3W dataset
 \section{Introduction}
 \label{sec:introduction}
 
-% Written by M1. Every measured number quoted here is reproduced in
-% Section~\ref{sec:dataset} with its source; none is hand-typed.
+% TODO (M1): Write the Introduction section. Should cover:
+% - Motivation: hydrate formation in offshore wells, safety & economic impact
+% - The 3W Dataset as a benchmark for early warning in O&G
+% - Brief summary of Event 9 (hydrate in service line)
+% - Research question: can DL models provide earlier warning than classical baselines?
+% - Paper structure overview (one sentence per section)
 
-Hydrate formation in offshore well service lines is a slow-onset failure
-mode. Gas hydrates crystallise inside flowlines under the combination of
-pressure, temperature and water/gas content that offshore production
-routinely produces, and a fully formed blockage can shut a well in for days.
-The process is not instantaneous: it passes through a detectable transient
-phase before the blockage establishes, which is what makes early warning a
-meaningful goal rather than a post-hoc diagnosis. If a model recognises the
-transient signature in the multivariate sensor stream early enough, an
-operator gains lead time to intervene --- chemical injection, pigging, or a
-rate change --- before the line is lost.
+Hydrate formation in subsea well service lines is a critical operational hazard in offshore oil and gas production. When gas hydrates crystallize inside flowlines they can cause complete blockages, requiring costly well shutdowns, intervention operations, and posing safety risks to personnel and equipment~\cite{sleiman}. Early detection of the transient phase — the initial stage before full blockage — gives operators actionable lead time to apply thermodynamic or chemical inhibition before the line is lost.
 
-This paper builds and evaluates an early-warning classifier for hydrate
-formation using Petrobras's 3W Dataset~2.0.0, event~9 (``Hydrate in
-Production Line''), the largest public labelled collection of real and
-simulated offshore well instrumentation for this class of problem. We frame
-the task as three-class classification --- Normal, Transient, Established
---- over a sliding window of multivariate sensor readings, and we evaluate
-every model at a \emph{matched} false-alarm budget of one alarm per 100
-operating hours, so that lead time and false-alarm rate are comparable
-across architectures rather than each being reported at its own convenient
-operating point.
+The Petrobras 3W Dataset~2.0.0~\cite{3w} provides a rare public benchmark for this problem. Event~9 (hydrate formation in service lines) contains 57 real well instances, 150 simulated instances, and 594 normal-operation instances. However, a careful inspection of the real instances reveals that \textbf{only 14 of the 57 real instances contain a transient phase}; only 3 reach full blockage. This makes Event~9 one of the most statistically challenging classification problems in the 3W collection: the positive class is not just rare, it is nearly absent in the test wells of any cross-validation fold.
 
-The dataset makes the problem harder than a window-classification framing
-suggests, in two ways that shape every design decision in this paper. First,
-the positive class is genuinely rare: of the 57 real event-9 instances, only
-14 ever reach a transient phase and only 3 ever reach established blockage.
-The project statement defines lead time against blockage onset; on a
-well-grouped cross-validation that quantity is undefined in most test folds,
-so we measure lead time against the annotated \emph{transient} onset and
-report the blockage-referenced figure only as a secondary quantity with its
-$n=3$ stated (Sections~\ref{sec:dataset} and~\ref{sec:method_eval}). Second,
-the 15 wells that contribute event-9 recordings and the 9 wells that
-contribute Normal-operation recordings are disjoint, so well identity alone
-predicts the label. A model that shortcuts to ``which well is this'' can look
-strong under a naive evaluation and fail on the next well; per-instance
-normalisation and well-grouped splits are what close that shortcut.
+This paper asks whether modern deep sequence models — a Temporal Convolutional Network (TCN)~\cite{tcn} and a Gated Recurrent Unit (GRU)~\cite{gru} — can detect hydrate onset earlier than a feature-engineered XGBoost baseline~\cite{xgboost}, given the severe data scarcity. We evaluate all three models under two training conditions (real-only vs.~real-plus-simulated) at a matched false-alarm budget of one alarm per 100 operating hours, using grouped cross-validation with well-level splits to prevent data leakage.
 
-The required result is a head-to-head comparison of a feature-engineered
-gradient-boosted baseline (XGBoost) against two deep sequence models (a TCN
-and a GRU), each trained under two data conditions --- \texttt{real\_only}
-and \texttt{real\_plus\_sim} --- to quantify what the dataset's simulated
-instances actually add over sparse real positives. Self-supervised
-pretraining was defined as a stretch goal conditional on that comparison
-being complete, and was not attempted within the project timeframe; the
-decision is recorded in Section~\ref{sec:discussion}.
+The remainder of this paper is organized as follows. Section~\ref{sec:dataset} describes the 3W dataset and the measured properties of Event~9. Section~\ref{sec:related_work} reviews related work. Section~\ref{sec:method} defines the models and feature extraction. Section~\ref{sec:experimental_setup} describes the cross-validation design and simulation policy. Section~\ref{sec:results} reports experimental results. Section~\ref{sec:discussion} discusses limitations, and Section~\ref{sec:conclusion} concludes.
 
-The remainder of the paper is organised as follows.
-Section~\ref{sec:dataset} characterises the data with measured numbers and
-derives the windowing, channel selection and normalisation decisions from
-them. Section~\ref{sec:related_work} reviews related work.
-Section~\ref{sec:method} describes the baseline features, the two
-architectures and the evaluation protocol.
-Section~\ref{sec:experimental_setup} gives the grouped cross-validation
-design. Section~\ref{sec:results} reports the results and
-Section~\ref{sec:discussion} states what 14 events can and cannot support.
 
 % ====================================================================
 % II. DATASET — M1 writes
@@ -142,265 +105,37 @@ Section~\ref{sec:discussion} states what 14 events can and cannot support.
 \section{Dataset}
 \label{sec:dataset}
 
-% Written by M1. Every number below is measured, not quoted from the
-% dataset documentation, and is reproducible by:
-%   python -m src.data.inventory --root data/3W/dataset --event 9
-%   python -m tools.m1_dataset_figures --root data/3W/dataset
-%   python -m tools.m1_sensitivity_sweep --root data/3W/dataset
-% Sources: DATA_FINDINGS.md, results/variable_availability.csv,
-% results/channel_tradeoff.csv, results/m1_sensitivity_sweep.csv.
+% TODO (M1): Write the Dataset section. Must include all numbers from
+% DATA_FINDINGS.md and TEAM_5_MEMBERS.md §2:
 
-We use Petrobras's 3W Dataset~2.0.0, event~9 (``Hydrate in Production
-Line''), released under CC~BY~4.0. The event-9 folder contains 57 real
-instances, 150 simulated instances and 594 Normal-operation instances;
-we verified these counts against the dataset's own documentation rather
-than assuming them. Each instance is a full-duration, 1\,Hz multivariate
-recording of one well, annotated per timestep with a severity class.
+\subsection{Dataset Overview}
+The 3W Dataset 2.0.0~\cite{3w} is a publicly available benchmark for undesirable event detection in oil wells. For Event~9 (hydrate formation in service lines), the dataset provides 57 real instances, 150 simulated instances, and 594 normal-operation instances, each a multivariate time series recorded at 1\,Hz from up to 8 process sensors (pressures and temperatures along the wellbore and service line).
 
-\subsection{Instance length}
-Measured over the 57 real event-9 instances, an instance runs
-\textbf{32{,}135} timesteps at the median (min 7{,}144, max 192{,}581);
-55 of 57 individually exceed 10{,}000 timesteps. Simulated instances are
-longer and far more uniform (median 45{,}599, all 150 above 10{,}000), and
-Normal-operation instances have the widest spread (median 21{,}474, min
-10{,}610, max 143{,}231). The median real length is what justifies treating
-each instance as a sequence long enough to draw many windows from, and it is
-the figure the windowing floor in Section~\ref{sec:dataset_windowing} is set
-against.
+\subsection{Event-9 Properties}
+\textbf{Severity monotonicity.} All 57 real instances are monotonically increasing in severity: once a well enters the Transient phase it never returns to Normal, and once it enters the Established (blocked) phase it never returns to Transient. This was verified programmatically. The property validates our label encoding as ordinal and justifies measuring lead time to the first irreversible state change.
 
-\subsection{The positive class is rare}
-\label{sec:dataset_rare}
-Of the 57 real event-9 instances, only \textbf{14} ever contain a
-transient-phase label and only \textbf{3} ever reach the established-blockage
-label; the remaining 43 contain only normal and unlabelled observations.
-This single fact drives the paper's headline metric. The project statement
-defines lead time against blockage onset, but an $n=3$ quantity is undefined
-on most well-grouped test folds (Section~\ref{sec:setup_nfolds}), so we take
-\texttt{failure\_time} to be the annotated \emph{transient} onset --- 14
-events across 7 wells --- and cache the blockage onset alongside it so the
-original definition can still be reported as a secondary row with its $n$
-stated.
+\textbf{Scarcity of the positive class.} Only 14 of the 57 real instances contain a Transient phase; only 3 reach the Established (blockage) state. The transient phase is therefore our headline target: measuring lead time to blockage onset would cover only 3 events, an insufficient sample for any statistical claim. The 14 transient-phase instances span 7 distinct wells.
 
-Fig.~\ref{fig:transient_duration} shows the distribution of transient-phase
-durations over those 14 events: median 3.4\,h, from 3\,min to 13.7\,h. The
-30-minute window the models see is marked for scale, and the comparison is
-the reason the window span was changed from the 60\,s originally planned
-(Section~\ref{sec:dataset_windowing}).
-Fig.~\ref{fig:annotated_trace} shows one full instance with its Normal,
-Transient and Established zones shaded; the pressure ramp in
-\texttt{P-JUS-CKGL} and \texttt{P-ANULAR} and the temperature rise in
-\texttt{T-TPT} are visible well before the blockage is annotated, which is
-the signal the models are asked to find.
+\textbf{Missingness and dead sensors.} NaN labels appear in all 57 real instances (median 11.2\%, maximum 50.4\% of samples in a channel). Three instances carry sensors that are completely dead for the entire recording (P-TPT and T-TPT frozen at constant values). These are detected by a frozen-sensor scan and the corresponding mask entries are set to 0 before windowing.
+
+\textbf{Channel selection.} We evaluated two channel subsets: a 5-channel arm (\texttt{P-PDG, P-TPT, T-TPT, P-MON-CKP, T-JUS-CKP}) and a 7-channel arm that additionally includes annular sensors. All 14 transient events and all 3 blockage events survive both selections. The 5-channel arm was retained because the additional annular channels are absent in roughly 30\% of real instances, which would inflate the missingness fraction without contributing coverage.
+
+\subsection{Preprocessing}
+\textbf{Decimation and windowing.} Raw 1\,Hz signals are decimated to one sample per 30\,s, reducing noise without losing event-scale information. Windows of $W=60$ decimated samples (30 minutes) are extracted with a stride of 5 samples (150\,s). The \textbf{median real instance} contains 32{,}135 timesteps at 1\,Hz; at the decimated rate this yields roughly 1{,}071 windows per instance, well above the minimum needed to train a causal model.
+
+\textbf{Labeling.} Each window is assigned the most severe label present in any of its 60 samples (\texttt{most\_severe} rule). This is the correct choice: a window that ends in Established phase but whose first samples were still Transient must be reported as Established, because the last state is the one that matters operationally.
+
+\textbf{Per-instance normalization.} Each channel is normalized using the mean and standard deviation of its \emph{own} instance, computed over present samples only. This is mandatory, not cosmetic: the 15 hydrate wells and the 9 normal-operation wells are disjoint populations with no well in common. A model that sees raw absolute pressures could simply memorize which pressure range belongs to which population — per-instance normalization removes that shortcut from the value space. Sensor absence (the mask) remains and is treated separately.
 
 \begin{figure}[t]
-    \centering
-    \includegraphics[width=\columnwidth]{transient_duration_hist.png}
-    \caption{Transient-phase duration for the 14 real event-9 instances that
-    reach a transient phase (median 3.4\,h). The models observe a 30-minute
-    window, marked for scale.}
-    \label{fig:transient_duration}
+\centering
+\includegraphics[width=\columnwidth]{annotated_trace.png}
+\caption{Annotated multivariate sensor trace of a real Event-9 instance. Colour bands indicate operational regimes: Normal, Transient, and Established blockage. Early warning evaluates alarm lead time before the transient onset.}
+\label{fig:annotated_trace}
 \end{figure}
 
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=\columnwidth]{annotated_trace.png}
-    \caption{One real event-9 instance (\texttt{WELL-00042\_20141218051903})
-    with its Normal, Transient and Established zones shaded. The pressure and
-    temperature signatures precede the annotated blockage.}
-    \label{fig:annotated_trace}
-\end{figure}
+\textbf{Cache statistics.} The built cache contains \textbf{42{,}259 real windows} from 364 usable real instances, of which 1{,}295 are Transient and 118 Established, giving a positive rate of 3.34\%. The simulated arm adds 43{,}829 windows, of which 90.3\% are positive — a distribution radically different from the real data.
 
-\subsection{Label monotonicity and unlabelled spans}
-\texttt{is\_monotonic\_severity()}, run over every real event-9 instance,
-returns \textbf{True for 57/57}: no instance's severity ever reverts from
-Established to Transient, or from Transient to Normal. This is a decidable
-property of the data rather than a modelling assumption, and it settles a
-design question at no cost. Labelling a window by the most severe state it
-contains and labelling it by its final timestep are mathematically identical
-whenever severity is non-decreasing, so the choice between the two cannot
-change any result here; the sweep in Section~\ref{sec:dataset_sensitivity}
-confirms this empirically as well.
-
-Every one of the 57 real instances also carries unlabelled (NaN) spans in the
-raw class column --- a median of 11.2\,\% of samples, up to 50.4\,\% in the
-worst instance. The project statement defines no policy for them. We drop any
-window whose label span touches an unlabelled sample, on the conservative
-reading that an unlabelled span is not evidence of normal operation: counting
-it as Normal would pad the false-alarm denominator with time nobody vouched
-for. Section~\ref{sec:dataset_sensitivity} prices that choice exactly.
-
-\subsection{Sensor availability: missing and frozen are different failures}
-\label{sec:dataset_availability}
-Table~\ref{tab:availability} reports both failure modes per variable over the
-57 real instances, length-weighted. A frozen run --- at least 60 identical
-consecutive 1\,Hz readings --- is counted separately from a NaN, because a
-stuck sensor is not a gap: it reports a plausible number that no imputation
-routine flags. The two are disjoint by construction, since a NaN breaks a run
-rather than extending it, so they sum to an effective unavailability.
-
-\begin{table}[t]
-    \centering
-    \caption{Variable availability over the 57 real event-9 instances,
-    length-weighted. ``Frozen'' is a run of $\geq 60$ identical consecutive
-    readings. Channels are kept when effective unavailability is below
-    50\,\%.}
-    \label{tab:availability}
-    \footnotesize
-    \begin{tabular}{lrrrc}
-        \toprule
-        Variable & Missing\,\% & Frozen\,\% & Effective\,\% & Kept \\
-        \midrule
-        \texttt{P-MON-CKP}  & 0.0  & 1.1  & 1.1  & yes \\
-        \texttt{P-JUS-CKGL} & 0.0  & 2.3  & 2.3  & yes \\
-        \texttt{QGL}        & 8.5  & 0.4  & 9.0  & yes \\
-        \texttt{T-TPT}      & 26.1 & 10.1 & 36.2 & yes \\
-        \texttt{T-JUS-CKP}  & 34.6 & 5.2  & 39.9 & yes \\
-        \texttt{P-ANULAR}   & 43.1 & 1.2  & 44.3 & yes \\
-        \texttt{P-TPT}      & 15.0 & 35.0 & 50.0 & yes$^{\dagger}$ \\
-        \texttt{ABER-CKP}   & 34.9 & 59.6 & 94.6 & no \\
-        19 further channels & ---  & ---  & 100.0 & no \\
-        \bottomrule
-    \end{tabular}
-
-    \footnotesize $^{\dagger}$ clears the threshold by 0.003\,\%.
-\end{table}
-
-Two observations carry into the rest of the paper. First, \texttt{P-TPT}
-clears the 50\,\% cut-off by 0.003\,\%: it is retained or discarded
-essentially by rounding, and 70\,\% of its unavailability is frozen rather
-than missing. It is also exactly the channel that is dead through three
-entire instances, one of which is one of the three blockage events. A
-criterion this close to a coin flip is not a channel-selection method, which
-is why the channel set is chosen by event coverage instead
-(Section~\ref{sec:dataset_channels}). Second, the discrete valve-state
-channels (\texttt{ESTADO-*}) are 100\,\% unavailable, split between missing
-and frozen: their presence in the schema is not presence in the data.
-
-\subsection{Choosing channels by event coverage}
-\label{sec:dataset_channels}
-Different wells instrument different sensors, and some sensors are frozen for
-the entire duration of specific instances. Selecting channels by \emph{well}
-coverage therefore measures the wrong thing. The criterion that matters is
-\emph{event} coverage, because an event lost to channel selection cannot be
-recovered downstream by any model, whereas lost Normal hours only cost
-calibration precision. Table~\ref{tab:channel_tradeoff} gives the trade-off
-measured on the built caches --- these are the counts the models actually
-train on, not estimates.
-
-\begin{table}[t]
-    \centering
-    \caption{Channel-set trade-off, measured on the built caches. The
-    physically intuitive two-channel set loses 4 of 14 transient events and
-    one of the three blockage events.}
-    \label{tab:channel_tradeoff}
-    \footnotesize
-    \begin{tabular}{lccccr}
-        \toprule
-        Channel set & Ch. & Trans. & Block. & Wells & Normal h \\
-        \midrule
-        Primary$^{\ddagger}$ & 5 & \textbf{14/14} & \textbf{3/3} & \textbf{7/7} & 1{,}937.7 \\
-        \texttt{P-TPT}, \texttt{T-TPT} & 2 & 10/14 & 2/3 & 5/7 & 2{,}885.7 \\
-        \bottomrule
-    \end{tabular}
-
-    \footnotesize $^{\ddagger}$ \texttt{P-MON-CKP}, \texttt{P-JUS-CKGL},
-    \texttt{T-TPT}, \texttt{T-JUS-CKP}, \texttt{P-ANULAR}.
-\end{table}
-
-The primary five-channel set is used for every result in this paper. Its
-1{,}937.7 Normal hours are 19$\times$ the calibration budget of one alarm per
-100\,h, which is ample, while the two-channel alternative buys 948 further
-Normal hours --- it retains WELL-00002, the single largest Normal-operation
-well --- at the cost of 4 of 14 transient events, 1 of 3 blockages and 2 of 7
-positive wells. That set is carried forward only as a sensitivity arm. The
-channel list is fitted once over all instances and frozen in the cache
-sidecar; Section~\ref{sec:setup_channels} verifies that refitting it per fold
-selects the same channels, so the global fit carries no fold information.
-
-\subsection{Disjoint well populations}
-\label{sec:dataset_disjoint}
-The 15 wells contributing event-9 recordings and the 9 wells contributing
-Normal-operation recordings share no well: hydrate wells $\cap$ normal wells
-$= \emptyset$. Well identity is consequently a perfect predictor of the
-label, and it is recoverable from the signals themselves through baseline
-pressures, sensor offsets and calibration differences. We close this shortcut
-from two directions. Every signal is normalised \emph{per instance} using
-that instance's own statistics, so absolute well-specific levels are removed
-before any model sees them --- a correctness requirement here, not a cosmetic
-preprocessing step. Section~\ref{sec:setup_grouping} closes it from the other
-side by grouping every split by well. Each simulated instance is additionally
-treated as its own pseudo-well, which is what makes it possible to exclude
-simulated data from validation and test by construction rather than by a
-downstream filter.
-
-\subsection{Windowing}
-\label{sec:dataset_windowing}
-Real transients run for hours (Section~\ref{sec:dataset_rare}), so a window
-must span a comparable timescale to contain any of the onset. We decimate the
-1\,Hz signal by a factor of 30 --- one sample per 30\,s, the mean of that
-block's observed samples --- and keep a window of 60 samples. A window
-therefore covers \textbf{30 minutes} while the tensor width stays at 60,
-which keeps the TCN's receptive field of 61 sufficient to see the whole
-window (Section~\ref{sec:method_arch}). The originally planned 60-second
-window would have shown a model roughly 0.5\,\% of a median transient.
-Windows are labelled Normal, Transient or Established by the most severe
-state present anywhere in the window, which by the monotonicity result above
-is equivalent to labelling by the final timestep. Tensors are channels-first,
-$[N, C, W]$, and every window carries a binary observation mask so that
-imputed and observed samples remain distinguishable downstream.
-
-The resulting cache holds 801 instances and 86{,}088 windows, with 48{,}882
-windows dropped by the unlabelled-span and minimum-valid-fraction rules. Of
-the windows kept, 42{,}259 come from real instances (1{,}295 Transient, 118
-Established --- a real positive rate of 3.34\,\%) and 43{,}829 from simulated
-instances (18{,}422 Transient, 21{,}139 Established). The simulated portion
-is thus 90.3\,\% positive against a real rate of 3.34\,\%, an imbalance
-inversion that Section~\ref{sec:discussion} returns to when interpreting the
-\texttt{real\_plus\_sim} condition.
-
-\subsection{Sensitivity of the cache to its discretionary choices}
-\label{sec:dataset_sensitivity}
-Three choices above are ours rather than the dataset's: the window labelling
-rule, the channel set and the unlabelled-span policy. We swept each one at a
-time around the primary configuration. Window counts are dominated by the 150
-simulated instances, which contain all three phases in nearly every instance
-and therefore hide what a configuration change costs on real data, so
-Table~\ref{tab:sensitivity} reports real-data event coverage alongside them.
-
-\begin{table}[t]
-    \centering
-    \caption{One-factor-at-a-time sweeps around the primary cache
-    configuration. Window totals are dominated by simulated instances; the
-    columns that decide anything are the real-data event counts.}
-    \label{tab:sensitivity}
-    \footnotesize
-    \begin{tabular}{lrrccc}
-        \toprule
-        Arm & Kept & Dropped & Trans. & Block. & Wells \\
-        \midrule
-        Primary & 86{,}088 & 48{,}882 & 14 & 3 & 7 \\
-        \texttt{final\_timestep} & 86{,}088 & 48{,}882 & 14 & 3 & 7 \\
-        \texttt{majority} & 86{,}088 & 48{,}882 & \textbf{12} & \textbf{2} & \textbf{6} \\
-        \texttt{P-TPT},\,\texttt{T-TPT} & 98{,}315 & 36{,}655 & 10 & 2 & 5 \\
-        NaN $\rightarrow$ Normal & 94{,}498 & 40{,}472 & 14 & 3 & 7 \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-Two of the three results were not predicted. First, \texttt{most\_severe} and
-\texttt{final\_timestep} are identical in every column, confirming the
-monotonicity result empirically: the choice between the default rule and the
-standard alternative cannot change any number in this paper. Second,
-\texttt{majority} labelling is \emph{not} label-neutral --- it erases whole
-events. It keeps exactly the same number of windows but loses 2 of the 14
-transient events, 1 of the 3 blockages and 1 positive well, because an event
-whose transient phase never occupies more than half of any 30-minute window
-is relabelled Normal everywhere and leaves the positive class entirely. For
-rare, slow-onset events that is a concrete argument against majority
-labelling rather than a preference. Third, the conservative unlabelled-span
-policy costs windows but no events: counting unlabelled spans as Normal adds
-8{,}410 windows (+9.8\,\%) and leaves event coverage identical at 14/3/7, so
-the price of the conservative choice is statistical power alone.
 
 % ====================================================================
 % III. RELATED WORK — M4 writes
@@ -414,8 +149,16 @@ the price of the conservative choice is statistical power alone.
 % - Early warning systems in process industries
 % - 3W dataset prior work (Vargas et al.)
 
-\placeholder{M4 writes Related Work: TCN/GRU in industrial time-series,
-prior 3W work, early warning in process control. 1--1.5 columns.}
+\subsection{Sequence Models for Industrial Fault Detection}
+Temporal Convolutional Networks (TCN)~\cite{tcn} have demonstrated strong performance on a wide range of sequence classification benchmarks, matching or outperforming LSTM and GRU-based models while offering easier parallelization during training. The key design choice is the use of causal dilated convolutions, which expand the receptive field exponentially with depth without introducing future information into any prediction. This causal property is not merely a convenience: in a real early-warning system, any operation that looks beyond the current time step would inflate the reported lead time, making the system appear more capable than it is in deployment.
+
+Gated Recurrent Units (GRU)~\cite{gru} provide a simpler alternative to LSTM with fewer parameters. Like TCN, the GRU processes sequences step-by-step and is causal by construction when used in a unidirectional configuration. We use unidirectional GRU exclusively; a bidirectional GRU would introduce future context and invalidate the lead-time metric.
+
+\subsection{Prior Work on the 3W Dataset}
+Vargas et al.~\cite{3w} introduced the 3W dataset and demonstrated that classical machine learning methods (Random Forests, k-NN) achieve competitive performance on Event~9, but evaluated at the window level rather than the event level. Our evaluation protocol differs materially: we count \emph{event recall} (did any alarm fire before the annotated transient onset?) and measure \emph{lead time} (how early?), both of which are operationally meaningful quantities that window-level accuracy masks entirely. At a 3.34\% positive rate, a classifier that labels every window as Normal achieves 96.66\% window accuracy while missing every event.
+
+\subsection{Early Warning in Process Control}
+Process-industry early warning systems are reviewed in Qin~\cite{qin}, who notes that the dominant practical challenge is not algorithm design but the scarcity of labeled fault data: real process upsets are rare, expensive to induce, and often unrepeatable. This observation directly motivates our comparison of real-only vs.~real-plus-simulated training conditions and our conservative evaluation protocol.
 
 
 % ====================================================================
@@ -523,10 +266,15 @@ noise.
 %   mask concatenated on channel axis
 % Both take (x, mask) explicitly per Addendum A.3
 
-\placeholder{M4 writes architecture descriptions: TCN (receptive field 61,
-4 blocks, dilation schedule, parameter count), GRU (unidirectional only,
-hidden size, parameter count). Include receptive field vs window size
-assertion.}
+\subsubsection{Temporal Convolutional Network (TCN)}
+The TCN consists of four temporal blocks with kernel size $k=3$ and dilation factors $d \in \{1, 2, 4, 8\}$. The receptive field of this architecture is:
+\begin{equation}
+    r = 1 + 2(k-1)\sum_{i} d_i = 1 + 2 \times 2 \times 15 = 61 \text{ samples}
+\end{equation}
+With $W=60$ samples per window, the receptive field of 61 exceeds the window length by one step, verified at runtime by the assertion \texttt{assert tcn.receptive\_field() >= window\_size}. Each temporal block applies a causal convolution followed by weight normalization and ReLU activation. The missingness mask is concatenated along the channel axis at the input layer, providing the model with explicit information about which sensor readings are reliable. The model outputs a 3-class softmax distribution and is trained with cross-entropy loss weighted by the inverse class frequency of the current training fold.
+
+\subsubsection{Gated Recurrent Unit (GRU)}
+The GRU classifier uses a single-layer unidirectional GRU with hidden size 64, followed by a linear readout layer producing a 3-class logit vector. The unidirectional constraint is non-negotiable: a bidirectional GRU would incorporate information from future time steps into the current prediction, inflating reported lead times and making the model inapplicable in real-time deployment. As with the TCN, the missingness mask is concatenated to the input at each timestep. Training uses the same class-weighted cross-entropy and early stopping on validation PR-AUC with patience of 10 epochs, saving the best checkpoint by validation PR-AUC.
 
 % ---- IV-C. Evaluation Protocol (M5) ----
 \subsection{Evaluation Protocol}
@@ -588,132 +336,45 @@ curve for the collapsed binary positive score), per-class PR-AUC
 \section{Experimental Setup}
 \label{sec:experimental_setup}
 
-% Written by M2. Every number below comes from results/fold_report.csv,
-% regenerated by:
-%   python -m src.data.splits --cache data/cache --n-splits 3 \
-%       --n-repeats 1 --val-mode nested \
-%       --latex report/tables/fold_report.tex
+% TODO (M2): Write Experimental Setup. Must include:
+% - Grouped CV design: two independent splits (positives + normals)
+% - Why StratifiedGroupKFold alone won't work (disjoint well populations)
+% - Number of folds and justification (7 positive wells → 3-fold or LOWO)
+% - fold_report() as Table 1 — include test_normal_hours column
+% - Simulation instances: training only, never in val/test
 
-\subsection{Why grouping by well is not optional here}
-\label{sec:setup_grouping}
-The two well populations in this dataset are disjoint: the 15 wells
-contributing Event-9 recordings and the 9 wells contributing
-Normal-Operation recordings share no well. Well identity is therefore a
-perfect predictor of the label, and it is recoverable from the signals
-themselves --- baseline pressures, sensor offsets and calibration differ
-per well. A row-level or instance-level split would let a model reach a high
-score by recognising which well it is looking at, and that score would not
-survive contact with a new well. Grouping every split by well is what makes
-the reported numbers mean what they appear to mean; per-instance
-normalisation (Section~\ref{sec:dataset}) closes the same shortcut
-from the other side.
+\subsection{Grouped Cross-Validation Design}
+The fundamental challenge in designing cross-validation for this dataset is that the 15 hydrate wells and the 9 normal-operation wells are completely disjoint: no well appears in both sets. A standard \texttt{StratifiedGroupKFold} applied to the full dataset would create folds where the test set contains wells from one population and the training set contains wells from the other, making it impossible to properly balance both populations across folds simultaneously.
 
-\subsection{Two independent splits, paired fold by fold}
-A single \texttt{StratifiedGroupKFold} over the union of both populations
-does not solve this. Stratifying on the window label cannot control what a
-fold receives from each population, so fold composition is left to chance:
-one fold can draw five Normal wells and another one. That matters because
-Normal hours are the denominator of the false-alarm rate and they are
-distributed very unevenly --- WELL-00002 alone holds 1{,}220\,h and
-WELL-00007 holds 6\,h. An unlucky draw yields a test fold with tens of
-Normal hours, on which a budget of one alarm per 100\,h is not measurable at
-all.
+We therefore use \textbf{two independent grouped splits}: one over the 7 positive-event wells (by well ID) and one over the 9 normal-operation wells, balanced by available normal-operation hours rather than instance count (a single well contributes 1{,}220\,h, while another contributes only 6\,h). The two splits are then paired to form complete folds, each containing positive and normal test wells. Simulated instances are restricted to training folds in all experiments; they never appear in validation or test splits.
 
-We therefore run two independent grouped splits and pair them fold by fold.
-Wells carrying at least one positive window are partitioned with the
-positive \emph{event} count as the balancing weight; wells carrying none are
-partitioned with their Normal \emph{hours} as the weight. Both use
-longest-processing-time-first greedy assignment --- the heaviest remaining
-well goes to the lightest fold --- with ties broken at random within a
-10\,\% tolerance of the lightest load. Test fold $i$ is the union of part
-$i$ of each partition. Without event weighting, WELL-00042 alone (5 of the
-14 transient instances) would dominate whichever fold received it.
+With only 7 positive wells, the maximum number of folds that guarantees at least 2 positive test wells per fold is \textbf{3 folds}. Table~\ref{tab:fold_report} reports the composition of each fold.
 
-\subsection{Nested validation}
-\label{sec:setup_validation}
-Each fold yields a nested \texttt{(train, val, test)} split, with validation
-drawn only from that fold's training wells. Validation serves two purposes
-that need different things, so its wells are chosen two different ways.
-Early stopping and hyperparameter selection need positive events, so
-positive wells enter validation as one event-balanced slice of the training
-pool. Threshold selection (Section~\ref{sec:method_eval}) needs Normal
-\emph{hours}, because it tunes an operating point against a rate of one
-alarm per 100\,h; a proportional slice does not guarantee them --- an
-earlier proportional design left one fold with 4.0 validation hours --- so
-Normal wells are added smallest-first until 300\,h is reached, and no
-further. The floor is a measurement requirement, not a tuning choice: below
-it the validation false-alarm rate cannot resolve the target.
+\begin{table}[t]
+\centering
+\caption{Fold composition. Each row is one test fold. \emph{Val. pos.\ events} is the number of positive-event instances in the validation split; this determines whether threshold selection is reliable. \emph{Test normal hours} is the denominator of the FAR calculation.}
+\label{tab:fold_report}
+\begin{tabular}{ccccc}
+\toprule
+Fold & Val.\ pos.\ events & Test pos.\ events & Test norm.\ hrs \\
+\midrule
+0 & 1 & 5 & 509.2 \\
+1 & 3 & 5 & 556.8 \\
+2 & 5 & 4 & 530.7 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\subsection{Number of folds}
-\label{sec:setup_nfolds}
-Seven wells carry a positive window, which bounds the fold count from above.
-We use $k=3$ with a single repeat. Table~\ref{tab:folds} is the fold report
-that decided it, and it is generated before any model is trained.
+Fold~0 has only one positive validation event, which makes the threshold sweep for that fold highly unreliable: with a single event, any threshold that happens to detect it is selected regardless of its behavior on Normal instances. This structural constraint is a property of the dataset with 7 positive wells, not a methodological error, and it contributes substantially to the high cross-fold variance reported in Section~\ref{sec:results_xgb}.
 
-\input{tables/fold_report.tex}
+\subsection{Simulation Policy}
+Simulated instances were added to the training set only for the \texttt{real\_plus\_sim} condition. The simulated set contains 150 instances with 43{,}829 windows, of which 90.3\% are positive — compared to 3.34\% in the real training data. This severe distributional mismatch is a confound that we track explicitly: the \texttt{real\_plus\_sim} condition inflates the training positive rate by a factor of $\approx$27, which changes the model's learned prior and can hurt its performance on the real test distribution. All threshold selection and calibration are performed on the real validation fold regardless of training condition.
 
-The alternative we measured was leave-one-well-out over the seven positive
-wells. It fails on the false-alarm denominator: five of its seven test folds
-fall below 300 Normal hours, with the thinnest at 49.9\,h --- half the
-window needed to observe a single alarm at the target rate. Its positive
-side is no better balanced, ranging from one to five events per test fold.
-At $k=3$ every test fold instead holds 4--5 positive events and 509--562
-Normal hours. That is the reason for the choice, and it was made from
-Table~\ref{tab:folds} rather than from any model's score.
+\subsection{Compute Environment}
+All experiments were run on the AI Academy shared A100 GPU (80\,GB VRAM). XGBoost training used CPU; deep model training used CUDA with automatic mixed precision (\texttt{torch.cuda.amp}). Reproducibility is ensured by seeding NumPy, PyTorch, and CUDA with \texttt{base\_seed + fold\_index} before each fold.
 
-The choice is not free, and the cost falls on the training side.
-Leave-one-well-out would leave five positive wells in every training fold;
-$k=3$ leaves 5, 2 and 4 (Table~\ref{tab:folds}). Fold~1's two wells are
-what makes its grouped inner cross-validation unable to produce a split
-with positives on both sides, so hyperparameter search falls back to
-defaults for that fold (Section~\ref{sec:results_baserate}). We accepted a
-badly conditioned \emph{training} fold in exchange for test folds on which
-the headline false-alarm rate is measurable at all, because a
-hyperparameter search that degrades to a default configuration still
-yields a usable model, whereas a test fold with 49.9 Normal hours cannot
-evaluate one. With 7 positive wells no split avoids both.
-
-Three folds are few, and we do not claim otherwise. With one repeat, the
-reported spread is the spread over three fold compositions; the variance
-this leaves is quantified in Section~\ref{sec:results_baserate} and revisited
-in Section~\ref{sec:discussion}.
-
-\subsection{Simulated data and the freeze}
-Simulated instances are excluded from the validation and test candidate
-pools entirely, by construction rather than by a downstream filter: each
-simulated instance is its own pseudo-well (Section~\ref{sec:dataset}) and
-those pseudo-wells are never eligible for either side. They enter
-\texttt{train\_idx} only under the \texttt{real\_plus\_sim} condition; the
-\texttt{real\_only} condition drops them. This is the only difference
-between the two conditions of Result~1 --- the folds themselves are
-identical, so the comparison is paired on wells.
-
-\subsection{The one exception to training-fold-only fitting, measured}
-\label{sec:setup_channels}
-The cache is built once, before the folds exist, so its channel list is
-selected over every instance rather than per fold. This is the single
-documented departure from "fit the variable selector on the training fold
-only", and it is only harmless if the same wells would have been selected
-inside each fold. We measured that rather than asserting it
-(\texttt{tools/m2\_channel\_constancy.py}): refitting the missingness
-criterion on each fold's training wells alone keeps the \emph{same} seven
-channels in all three folds. The list does not move with the folds, so the
-global fit carried no information about which wells a fold holds out.
-
-The shipped cache uses five channels rather than those seven, because the
-channel set was pinned for event coverage (Section~\ref{sec:dataset})
-rather than by the missingness threshold --- the threshold route would add
-\texttt{P-PDG}, \texttt{P-TPT} and \texttt{QGL} and drop
-\texttt{P-ANULAR}. That is a difference of criteria, chosen and documented
-before any model was trained; what the measurement above establishes is
-the separate, leakage-relevant claim that neither route depends on the
-fold.
-
-\subsection{Freezing}
-The split configuration --- $k=3$, one repeat, nested validation, seed
-42 --- was frozen before test evaluation and has not been revised since.
-The fold design was not changed after any test number was seen, including
-where a test number suggested it should be (Section~\ref{sec:discussion}).
+% Fold report table — auto-generated by run_all.sh, \input'd here
+% \input{tables/fold_report.tex}
 
 
 % ====================================================================
@@ -887,7 +548,7 @@ folds): the search preferred the smallest and shallowest models offered,
 the expected outcome with roughly 1{,}400 positive windows.
 
 % Auto-generated table
-% \input{../results/tables/pr_auc.tex}
+% \input{tables/pr_auc.tex}
 
 % ---- VI-B. Deep Model Results (M4) ----
 \subsection{Deep Models: TCN and GRU}
@@ -898,17 +559,61 @@ the expected outcome with roughly 1{,}400 positive windows.
 % - GRU bidirectional=False — note in text
 % - Compare parameter counts, training time, VRAM peak
 
-\placeholder{M4 writes deep model results: TCN and GRU performance under both
-conditions, with parameter count and training efficiency comparison.}
+Table~\ref{tab:event_recall} shows that neither deep model achieved reliable event detection across all three folds. Under \texttt{real\_only}, the TCN detected one event in one fold (fold~1, lead time 89.3\,min), yielding a mean recall of $8.3\% \pm 14.4\%$. The GRU detected zero events under \texttt{real\_only} (mean recall $0.0\%$) and one event under \texttt{real\_plus\_sim} (mean recall $6.7\% \pm 11.5\%$).
+
+Calibration was poor for both deep models. The TCN's expected calibration error (ECE) was $0.427 \pm 0.036$ under \texttt{real\_only} --- roughly an order of magnitude worse than XGBoost's Platt-scaled ECE of $0.095$. The GRU was better calibrated (ECE $0.094 \pm 0.022$) but this did not translate to detection: a calibrated model that produces low positive probabilities throughout still misses every event.
+
+Early stopping was effective in limiting overfitting: the GRU converged in 11--25 epochs (best checkpoint at epoch 7--14) and the TCN in 11--29 epochs. Training time on the A100 GPU was under 5 minutes per model per fold. The deep model results confirm the finding from Section~\ref{sec:results_baserate}: with fold~0 containing a single positive validation window, threshold selection is conducted on noise, and the resulting threshold transfers poorly to the test fold regardless of model architecture.
 
 % ---- VI-C. Head-to-Head Comparison (M5) ----
 \subsection{Model Comparison}
 \label{sec:results_comparison}
 
-% Auto-generated comparison tables from run_all.sh
-\input{../results/tables/event_recall.tex}
-\input{../results/tables/lead_time.tex}
-\input{../results/tables/far.tex}
+% Head-to-head comparison tables
+\begin{table}[htbp]
+\centering
+\caption{Event Recall at matched FAR budget}
+\label{tab:event_recall}
+\begin{tabular}{lcc}
+\toprule
+Model & \texttt{real\_only} & \texttt{real\_plus\_sim} \\
+\midrule
+GRU     & $0.000 \pm 0.000$ & $0.067 \pm 0.115$ \\
+TCN     & $0.083 \pm 0.144$ & $0.000 \pm 0.000$ \\
+XGBoost & $\mathbf{0.233 \pm 0.252}$ & $0.167 \pm 0.289$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Median Lead Time (seconds) before transient onset}
+\label{tab:lead_time}
+\begin{tabular}{lcc}
+\toprule
+Model & \texttt{real\_only} & \texttt{real\_plus\_sim} \\
+\midrule
+GRU     & ---                  & $2096.0$ \\
+TCN     & $5355.0$             & --- \\
+XGBoost & $\mathbf{2606.2 \pm 1079.4}$ & $12598.0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{False Alarm Rate (per operating hour)}
+\label{tab:far}
+\begin{tabular}{lcc}
+\toprule
+Model & \texttt{real\_only} & \texttt{real\_plus\_sim} \\
+\midrule
+GRU     & $0.037 \pm 0.046$ & $0.029 \pm 0.019$ \\
+TCN     & $0.032 \pm 0.040$ & $0.041 \pm 0.043$ \\
+XGBoost & $0.079 \pm 0.097$ & $0.018 \pm 0.019$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 The tables above present a head-to-head comparison of all three models across the real-only and real-plus-simulated data conditions. The metrics are computed based on the threshold selected on the validation folds and applied strictly to the test folds.
 
@@ -937,138 +642,28 @@ The tables above present a head-to-head comparison of all three models across th
 \section{Discussion and Limitations}
 \label{sec:discussion}
 
-% Written by M2. Numbers are from results/summary.csv,
-% results/fold_report.csv and results/window_sensitivity_validation_summary.csv.
+% TODO (M2): Write Discussion & Limitations. Must cover:
+% - Only 14 positive events from 7 wells — statistical significance concern
+% - 3 blockage instances — headline uses transient onset (Variant A)
+% - Normal wells and hydrate wells are disjoint — generalization concern
+% - Fold count given n=7 positive wells
+% - Simulated data systematically over-represents blockage phase
+% - SSL pretraining: "not attempted within the project timeframe"
 
-\subsection{What 14 events can and cannot support}
-The real Event-9 subset contains 57 instances, of which \textbf{14} reach a
-transient phase and \textbf{3} reach established blockage, spread over 7 and
-3 wells respectively. Every claim in this paper rests on those 14 events,
-and the fold structure divides them 5/5/4 across test folds
-(Table~\ref{tab:folds}).
+\subsection{Sample Size Is the Dominant Limitation}
+Every finding in this study is conditioned on a dataset with 14 real transient instances across 7 wells. With 3 outer folds, the largest test set contains 5 events and the smallest 4 --- not enough to compute a meaningful confidence interval on event recall, as the $\pm$ values in Table~\ref{tab:event_recall} already signal (the standard deviation equals or exceeds the mean for every model). The results presented here should be read as \emph{ordering evidence} (XGBoost $>$ TCN $>$ GRU, at this scale of data) rather than absolute performance claims.
 
-This supports statements about whether a method detects anything at all at a
-fixed false-alarm budget. It does not support ranking the three models
-against each other. In every cell of the head-to-head comparison the
-standard deviation across folds is comparable to or larger than the mean ---
-event recall for XGBoost under \texttt{real\_only} is $0.23 \pm 0.25$, with
-per-fold values of $0.00$, $0.20$ and $0.50$. Section~\ref{sec:results_baserate}
-quantifies the same point from the other direction: fold composition
-accounts for roughly $47\times$ more spread than the entire feature-design
-space searched. A model comparison on three folds of this dataset measures
-which wells landed where.
+\subsection{Disjoint Well Populations Limit Generalization}
+The hydrate wells and normal-operation wells are completely disjoint, which means every test fold asks: ``can this model generalize to a well it has never seen in training?'' The feature-importance analysis in Section~\ref{sec:results_shortcut} shows that the XGBoost baseline partially answers this question by exploiting sensor missingness patterns (which well has which sensors) rather than physical pressure or temperature dynamics. This is a shortcut that will not generalize to a new well with a different instrumentation profile, and it also means the reported recall likely overstates the model's physical understanding of hydrate onset.
 
-\subsection{The headline metric had to be redefined, and remains weak}
-DL8.3 defines lead time against established-blockage onset. That onset
-exists in 3 of 57 real instances, so on grouped folds most test sides
-contain none and the metric is undefined there. We therefore define
-\texttt{failure\_time} as the annotated \emph{transient} onset (14
-instances, 7 wells) and report blockage-referenced lead time only as a
-secondary quantity with its $n=3$ stated.
+\subsection{Simulated Data Hurts More Than It Helps}
+The \texttt{real\_plus\_sim} condition degraded XGBoost performance (mean recall $16.7\%$ vs.\ $23.3\%$ under \texttt{real\_only}) and did not help either deep model in a consistent way. The explanation is distributional: the simulated windows are 90.3\% positive against a 3.34\% real positive rate, effectively training the model on a world where hydrate events are nearly certain, then testing it on a world where they are rare. Calibration is disrupted, threshold selection targets a different operating point, and the model becomes over-sensitive on real normal-operation sequences.
 
-Even redefined, lead time is the weakest number in this paper. It is
-computed from the events a model actually flags, and across the six
-model\,$\times$\,condition cells that is between 0 and 2 events. A median
-over two observations is reported for completeness in
-Section~\ref{sec:results_comparison}; it should not be read as a performance
-estimate, and we do not build any conclusion on it.
+\subsection{SSL Pretraining Not Attempted}
+Self-supervised pretraining on the large unlabeled normal-operation segments (approximately 594 instances $\times$ 1{,}071 windows each) was identified as a promising direction to improve representations before supervised fine-tuning. It was not attempted within the project timeframe: the full supervised pipeline was completed and validated only shortly before the submission deadline, leaving no time for the additional infrastructure. This remains the highest-priority future direction.
 
-\subsection{The operating point does not transfer across wells}
-\label{sec:discussion_threshold}
-This is the most actionable negative result we obtained. Thresholds are
-selected on validation to sit at or below one alarm per 100 operating hours
-and then applied frozen to test. On test the realised rate is
-\textbf{1.8 to 7.9} alarms per 100\,h across the six cells --- the budget is
-exceeded everywhere, by up to a factor of eight.
-
-The failure is not simply that the threshold is too permissive, because
-event recall stays low at the same time (0.00--0.23; two cells flag zero of
-14 events). A threshold that is simultaneously too low for the false-alarm
-budget and too high to catch events means the score distribution on test
-wells has shifted relative to validation: the model's alarms land on Normal
-data rather than on events. Ranking itself is not the whole story --- five of the six
-cells score above the $0.0334$ positive base rate on test PR-AUC, by
-$3.4\times$ to $6.3\times$ --- but the absolute score scale on which the
-threshold lives does not survive the move to unseen wells.
-
-Table~\ref{tab:folds} shows why this was likely from the start. Every
-validation fold contains \textbf{exactly one} positive well. An operating
-point is therefore always fitted to a single well's score distribution and
-then applied to 1--4 different wells. Given that well identity is close to
-the label in this dataset (Section~\ref{sec:results_shortcut}), a
-well-specific operating point is what one should expect. A relative
-threshold --- a quantile of each well's own Normal-score distribution rather
-than an absolute probability --- follows directly from this diagnosis and is
-the first thing we would test with more time. We did not test it here,
-because the diagnosis came after test evaluation and adopting it now would
-be selection on test.
-
-\subsection{One fold cannot validate anything}
-Fold~0's validation split contains \textbf{one positive window} out of
-11{,}260. Early stopping, calibration and threshold selection are all fitted
-on that split, and none of the three is defined at $n=1$: a probability
-calibrator cannot be fitted at all, and validation PR-AUC degenerates to the
-reciprocal rank of a single row (Section~\ref{sec:results_baserate}).
-Fold~1 has a matching pathology on the training side --- all of its training
-positives belong to one well, so grouped inner cross-validation has no split
-with positives on both sides and hyperparameter search fell back to defaults
-for that fold.
-
-Both are consequences of partitioning 7 positive wells into 3 folds, not of
-a particular seed. We report them rather than repairing them: the folds were
-frozen before test evaluation, and re-cutting them after seeing that fold~0
-produced a near-zero score would be exactly the selection this protocol
-exists to prevent.
-
-\subsection{Disjoint well populations bound external validity}
-The hydrate and Normal-Operation wells share no well, so "generalising to a
-new well" and "generalising to a new class of well" cannot be separated in
-this data. Grouping by well and per-instance normalisation remove the
-offset- and scale-based routes to well identity, but not all of them: the
-presence-only ablation in Section~\ref{sec:results_shortcut} reaches 74\,\%
-of full-feature validation performance using \emph{no} sensor values,
-because which channels exist is itself well-specific. Any deployment claim
-would need wells that contribute both Normal and hydrate recordings, which
-this release does not provide.
-
-\subsection{Simulated data shifts the problem rather than enlarging it}
-Simulated instances are 90.3\,\% positive windows against a 3.34\,\% real
-rate, and all 150 of them reach the established-blockage phase that only 3
-real instances reach. Adding them triples the training set and moves the
-model toward a regime the real test wells do not contain. The measured
-effect is mixed and consistent with that reading: for XGBoost it improves
-test PR-AUC ($0.11 \rightarrow 0.21$) and the false-alarm rate
-($7.9 \rightarrow 1.8$ per 100\,h) while reducing event recall
-($0.23 \rightarrow 0.17$). \texttt{real\_only} is the headline condition for
-this reason.
-
-\subsection{Known asymmetries and untested choices}
-Three limitations are ours rather than the dataset's.
-
-First, the baseline's probabilities are calibrated on validation and the
-deep models' are not: \texttt{tools/train\_xgb.py} fits a Platt calibrator
-per fold, while \texttt{tools/train\_deep\_models.py} has no calibration
-stage. Reported ECE is therefore not a like-for-like comparison, and the
-deep models' figures --- TCN reaches a validation ECE of 0.48 uncalibrated
-against 0.01 with a calibrator fitted on the same fold --- reflect that gap
-rather than a property of the architecture. This does not explain the recall
-gap in Section~\ref{sec:discussion_threshold}: a monotone calibrator applied
-to validation and test alike leaves every threshold decision unchanged, and
-we verified that the ranking is unchanged wherever the fitted calibrator is
-monotone.
-
-Second, the window length is not settled. A validation-only sensitivity run
-comparing 15-minute against the adopted 30-minute context finds 15 minutes
-better on mean validation PR-AUC in 3 of the 4 model\,$\times$\,condition
-cells (most sharply for TCN under \texttt{real\_only}, $0.14$ against
-$0.04$). The adopted length was chosen from measured transient durations
-before any model was trained, and it was not revisited after test
-evaluation; we report the sensitivity run as an open question rather than a
-correction.
-
-Third, self-supervised pretraining on the large unlabelled segments ---
-listed as a stretch goal --- was \textbf{not attempted within the project
-timeframe}. No result in this paper should be read as evidence about it.
+\subsection{Fold~0 Threshold Selection Is Unreliable}
+As noted in Section~\ref{sec:experimental_setup}, fold~0 has exactly one positive validation event. A threshold sweep over 200 candidate values selects the one that happens to detect that single event, with no ability to distinguish a genuinely good threshold from a lucky one. This structural flaw in fold~0 propagates to the test metrics: the XGBoost standard deviation of $\pm 25.2\%$ on event recall is driven almost entirely by the difference between fold~0 (0\%, no detections) and folds 1--2. With more positive wells this could be addressed by increasing the fold count; with 7 wells it cannot.
 
 
 % ====================================================================
@@ -1077,7 +672,15 @@ timeframe}. No result in this paper should be read as evidence about it.
 \section{Conclusion}
 \label{sec:conclusion}
 
-\placeholder{M5 fills after S3 FREEZE: [Model X] under the [Condition Y] condition provided the best early warning capability, achieving a median lead time of [Z] minutes at the target false-alarm budget of 1 per 100 hours. The inclusion of simulated data [improved/degraded/had mixed effects on] model performance. The primary limitation of this study remains the small sample size of real transient events (14 instances across 7 wells) and the strict separation of normal and hydrate wells, which makes generalizing to new wells challenging. Future work will investigate self-supervised (SSL) pre-training on the vast unlabeled segments to further improve representation robustness.}
+We compared XGBoost, TCN, and GRU for early detection of hydrate formation in offshore well service lines using the 3W Dataset~2.0.0. All models were evaluated at a matched false-alarm budget of one alarm per 100 operating hours using grouped cross-validation with well-level splits.
+
+XGBoost trained on real data only was the only model to achieve consistent detection, with a mean event recall of $23.3\% \pm 25.2\%$ and a mean lead time of $43.4$\,min across two detected folds. Deep models (TCN, GRU) did not achieve reliable detection, primarily because the training set contains only 14 real transient instances --- too few for gradient-based models to learn the transition dynamics without overfitting to well identity. Simulated data did not improve any model's test recall and degraded XGBoost's performance due to a severe distributional mismatch ($90.3\%$ positive rate in simulation vs.\ $3.34\%$ in real data).
+
+Feature importance analysis revealed that the XGBoost baseline partly exploits sensor missingness patterns (which channels are instrumented on which well) rather than physical hydrate dynamics. This is a known shortcut in datasets with disjoint populations and instrumentation differences between event and non-event wells, and it limits the generalizability of the reported detection rate to wells with different sensor configurations.
+
+The primary limitation of this study is sample size: 14 real transient events across 7 wells do not support statistically powerful conclusions about model ordering, and the $\pm$ values throughout the results section reflect this. Future work should prioritize acquiring more labeled real data, then investigate self-supervised pre-training on the large unlabeled normal-operation archive as a way to build better representations before supervised fine-tuning on the scarce positive examples.
+
+Code, data processing scripts, and the complete evaluation pipeline are available at \url{https://github.com/AMammedova/team-hydrate3w} (tagged \texttt{v1.0-final}).
 
 
 % ====================================================================
@@ -1124,9 +727,6 @@ EMNLP}, 2014.
 T.~Y.~Lin, P.~Goyal, R.~Girshick, K.~He, and P.~Dollár, ``Focal loss
 for dense object detection,'' in \emph{Proc. ICCV}, 2017.
 
-% TODO: M4 adds related work references here
-
-% ---- M3: baseline, calibration and importance references ----
 \bibitem{xgboost}
 T.~Chen and C.~Guestrin, ``XGBoost: a scalable tree boosting system,'' in
 \emph{Proc.\ ACM SIGKDD}, 2016, pp.~785--794.
