@@ -63,7 +63,7 @@ hours, with lead time (time from first alarm to annotated transient onset)
 as the headline metric. Each model is trained under two conditions:
 real-only and real-plus-simulated data. We employ grouped cross-validation
 with well-level splits to prevent data leakage. Our results demonstrate that
-XGBoost trained exclusively on real data achieved the highest event recall of $23.3\%$ ($\pm 25.2\%$) and a mean lead time of $43.4$\,min across the two folds where any event was detected, at a matched false-alarm rate of $1.0\%$/h.
+XGBoost trained exclusively on real data achieved the highest event recall of $23.3\%$ ($\pm 25.2\%$) and a mean lead time of $43.4$\,min across the two folds where any event was detected. The threshold was selected on validation to meet a budget of one alarm per 100 operating hours, but that budget did not transfer: the realised test false-alarm rate was $7.9\%$/h, and no fold met the target.
 Deep models (TCN and GRU) did not reliably detect events on the held-out test wells in any condition, primarily because only 14 real transient instances are available for training and evaluation.
 Simulated data did not improve performance for any model.
 The feature-engineered baseline remains the only approach that demonstrates non-trivial detection on this dataset.
