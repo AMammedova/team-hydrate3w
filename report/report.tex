@@ -377,6 +377,18 @@ At $k=3$ every test fold instead holds 4--5 positive events and 509--562
 Normal hours. That is the reason for the choice, and it was made from
 Table~\ref{tab:folds} rather than from any model's score.
 
+The choice is not free, and the cost falls on the training side.
+Leave-one-well-out would leave five positive wells in every training fold;
+$k=3$ leaves 5, 2 and 4 (Table~\ref{tab:folds}). Fold~1's two wells are
+what makes its grouped inner cross-validation unable to produce a split
+with positives on both sides, so hyperparameter search falls back to
+defaults for that fold (Section~\ref{sec:results_baserate}). We accepted a
+badly conditioned \emph{training} fold in exchange for test folds on which
+the headline false-alarm rate is measurable at all, because a
+hyperparameter search that degrades to a default configuration still
+yields a usable model, whereas a test fold with 49.9 Normal hours cannot
+evaluate one. With 7 positive wells no split avoids both.
+
 Three folds are few, and we do not claim otherwise. With one repeat, the
 reported spread is the spread over three fold compositions; the variance
 this leaves is quantified in Section~\ref{sec:results_baserate} and revisited
@@ -392,6 +404,28 @@ those pseudo-wells are never eligible for either side. They enter
 between the two conditions of Result~1 --- the folds themselves are
 identical, so the comparison is paired on wells.
 
+\subsection{The one exception to training-fold-only fitting, measured}
+\label{sec:setup_channels}
+The cache is built once, before the folds exist, so its channel list is
+selected over every instance rather than per fold. This is the single
+documented departure from "fit the variable selector on the training fold
+only", and it is only harmless if the same wells would have been selected
+inside each fold. We measured that rather than asserting it
+(\texttt{tools/m2\_channel\_constancy.py}): refitting the missingness
+criterion on each fold's training wells alone keeps the \emph{same} seven
+channels in all three folds. The list does not move with the folds, so the
+global fit carried no information about which wells a fold holds out.
+
+The shipped cache uses five channels rather than those seven, because the
+channel set was pinned for event coverage (Section~\ref{sec:dataset})
+rather than by the missingness threshold --- the threshold route would add
+\texttt{P-PDG}, \texttt{P-TPT} and \texttt{QGL} and drop
+\texttt{P-ANULAR}. That is a difference of criteria, chosen and documented
+before any model was trained; what the measurement above establishes is
+the separate, leakage-relevant claim that neither route depends on the
+fold.
+
+\subsection{Freezing}
 The split configuration --- $k=3$, one repeat, nested validation, seed
 42 --- was frozen before test evaluation and has not been revised since.
 The fold design was not changed after any test number was seen, including

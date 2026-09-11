@@ -24,7 +24,13 @@
 ## 4. Cross-Validation & Experimental Setup (M2)
 - Preventing leakage: Grouped K-Fold by well
 - Independent splits for positive and normal wells
-- *Table: Fold report summary (M2 to provide)*
+- *Table: fold report — delivered. Generated from `results/fold_report.csv`
+  (`python -m src.data.splits --latex report/tables/fold_report.tex`), so it
+  does not need re-typing if the folds are ever regenerated.*
+
+> **M2: content delivered** — the assembled bullets live in
+> `final_slides.md` §4 (fold table, the LOWO comparison, and the frozen
+> split configuration). Edit them there; this outline is not the deck.
 
 ## 5. Baseline: XGBoost & Feature Engineering (M3)
 - Multi-timescale rolling feature extractor (30 min window)
@@ -54,7 +60,12 @@
 ## 10. Discussion & Limitations (M2)
 - Simulated data systematically over-represents the blockage phase
 - Small $N$ for real positive events (14 instances across 7 wells)
-- **M2 TODO:** Add 2-3 bullet points
+
+> **M2: content delivered** — `final_slides.md` §10 carries the measured
+> findings the test run produced: the validation-selected operating point
+> does not transfer (1/100 h target against 1.8–7.9/100 h realised), every
+> validation fold holds exactly one positive well, and fold 0's validation
+> has a single positive window. Edit them there.
 
 ## 11. Conclusion & Future Work (M5)
 - Summary of which architecture is recommended for early warning
